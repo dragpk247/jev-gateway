@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+# Jev Gateway Global CLI Driver
+set -e
+
+GATEWAY_DIR="$HOME/Projects/jev-gateway"
+PYTHON_BIN="/usr/bin/python3"
+PID_FILE="$HOME/.local/share/obsidian-ai-router/jev-gateway.pid"
+
+case "$1" in
+  start)
+    if [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
+      echo "⚡ Jev Gateway is already running (PID: $(cat "$PID_FILE")) on port 8080."
+      exit 0
+    fi
+    echo "🚀 Starting Jev Gateway background daemon on http://localhost:8080..."
+    nohup "$PYTHON_BIN" "$GATEWAY_DIR/server.py" > "$HOME/.local/share/obsidian-ai-router/server.log" 2>&1 &
+    echo $! > "$PID_FILE"
+    sleep 1
+    echo "✓ Running (PID: $(cat "$PID_FILE")). Web Dashboard: http://localhost:8080/dashboard"
+    ;;
+
+  stop)
+    if [ -f "$PID_FILE" ]; then
+      PID=$(cat "$PID_FILE")
+      if kill -0 "$PID" 2>/dev/null; then
+        echo "Stopping Jev Gateway (PID: $PID)..."
+        kill "$PID" || kill -9 "$PID"
+        rm -f "$PID_FILE"
+        echo "✓ Stopped."
+        exit 0
+      fi
+      rm -f "$PID_FILE"
+    fi
+    pkill -f "python3.*jev-gateway/server.py" 2>/dev/null || true
+    echo "✓ No running gateway process found."
+    ;;
+
+  status)
+    if [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
+      echo "● Jev Gateway is ACTIVE (PID: $(cat "$PID_FILE")) on http://localhost:8080"
+      curl -s http://localhost:8080/health || echo ""
+    else
+      echo "○ Jev Gateway is INACTIVE."
+    fi
+    ;;
+
+  dashboard)
+    xdg-open "http://localhost:8080/dashboard" 2>/dev/null || echo "Open in your browser: http://localhost:8080/dashboard"
+    ;;
+
+  stats)
+    curl -s http://localhost:8080/api/stats | python3 -m json.tool
+    ;;
+
+  "")
+    echo "Usage: jev [command | 'your prompt']"
+    echo ""
+    echo "Commands:"
+    echo "  jev start            Start background HTTP proxy daemon"
+    echo "  jev stop             Stop background HTTP proxy daemon"
+    echo "  jev status           Check server status and health"
+    echo "  jev dashboard        Open Web Telemetry Dashboard in browser"
+    echo "  jev stats            Inspect token & dollar savings via CLI"
+    echo "  jev --exec <prompt>  Route and execute prompt directly via CLI"
+    echo "  jev <prompt>         Dry-run route inspection"
+    ;;
+
+  *)
+    # Default: Pass through to main CLI
+    "$PYTHON_BIN" "$GATEWAY_DIR/main.py" "$@"
+    ;;
+esac

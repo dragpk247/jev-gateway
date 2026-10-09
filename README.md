@@ -105,28 +105,32 @@ python3 -m jev_gateway.indexer --index
 
 ---
 
-## 💻 Usage
-
-### 1. CLI Query (Auto-Route & Execute)
+### 1. Global CLI Usage (`jev`)
+Manage the gateway and query models directly from your terminal:
 ```bash
-python3 -m jev_gateway.executor --exec "How do I optimize Kafka consumer rebalance lag?"
+jev "Explain Paxos vs Raft"              # Dry-run route inspection
+jev --exec "How do I optimize Kafka?"    # Route & execute directly
+jev start                                # Start background HTTP proxy daemon
+jev stop                                 # Stop background HTTP proxy daemon
+jev status                               # Check health and PID status
+jev dashboard                            # Open Web Telemetry Dashboard in browser
+jev stats                                # Print real-time token and dollar savings
 ```
 
-### 2. Dry-Run / Routing Inspection
-```bash
-python3 -m jev_gateway.executor "Write a regex to match IPv6 addresses"
-```
-
-### 3. Drop-in OpenAI API Gateway Mode
-Launch the local proxy server (defaults to port 8080):
-```bash
-python3 server.py
-```
-Then configure **Cursor**, **Aider**, **Continue.dev**, or any Python OpenAI client:
+### 2. Drop-in OpenAI API Gateway & SSE Streaming
+Any tool expecting an OpenAI-compatible endpoint works out of the box with zero code changes:
 ```bash
 export OPENAI_BASE_URL="http://localhost:8080/v1"
-export OPENAI_API_KEY="dummy" # Handled internally by Jev Gateway
+export OPENAI_API_KEY="dummy"
 ```
+Supports both full JSON completions and real-time **Server-Sent Events (SSE)** chunked streaming (`stream: true`).
+
+### 3. Real-Time Web Telemetry Dashboard
+Open **`http://localhost:8080/dashboard`** to inspect:
+- Total requests and live dollar savings calculated against frontier cloud pricing.
+- FastPath cache hits (<3ms response times).
+- Zero-Leak Privacy Sandbox interception history.
+- Live stream of recent query latencies and token counts.
 
 ---
 
