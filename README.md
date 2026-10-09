@@ -136,7 +136,9 @@ aider --openai-api-base http://localhost:8000/v1 --model custom
 | **Deterministic Classifier (Sub-300ms)** | ❌ | ❌ | ❌ | **✅ (Jev System One)** |
 | **$0.00 Local Consumer GPU Offloading** | ❌ | ⚠️ (Manual tags) | ⚠️ (Static toggle) | **✅ (Autonomous)** |
 | **PKM Knowledge Injection (Obsidian)** | ❌ | ❌ | ✅ | **✅ (Pre-flight RAG)** |
-| **Multi-Tier Frontier Cloud Fallback** | ⚠️ (1 Model) | ✅ | ❌ | **✅ (Sonnet/Opus/Gemini)** |
+| **Zero-Leak Privacy Sandbox** | ❌ | ❌ | ❌ | **✅ (Local Hard-Lock)** |
+| **Bi-Directional Knowledge Feedback** | ❌ | ❌ | ❌ | **✅ (Vault Write-Back)** |
+| **Multi-Tier Frontier Cloud Fallback** | ⚠️ (1 Model) | ✅ | ❌ | **✅ (Claude/Gemini/DeepSeek)** |
 | **Zero Heavy GPU Classifier Overhead** | ⚠️ | ❌ | ❌ | **✅** |
 
 ---
