@@ -35,7 +35,7 @@ from main import (
 )
 
 HOST = os.getenv("HOST", "0.0.0.0")
-PORT = int(os.getenv("PORT", "8080"))
+PORT = int(os.getenv("PORT", "8085"))
 
 DASHBOARD_HTML = """<!DOCTYPE html>
 <html lang="en">
