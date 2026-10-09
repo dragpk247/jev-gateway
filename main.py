@@ -109,8 +109,8 @@ def query_jev_classifier(prompt: str) -> dict:
                 "instructions": "Select the most cost-effective and capable compute target.",
                 "criteria": {
                     "local_gpu": "Local task, syntax check, CLI script, config modification, or routine code suited for local RTX 5070 Ti.",
-                    "claude_sonnet": "Complex architectural system design, intricate refactoring, production full-stack code, or nuanced instructions.",
-                    "deepseek_reasoner": "Deep mathematical proofs, heavy algorithmic reasoning, or complex debugging traces.",
+                    "deepseek_reasoner": "Complex system architecture, distributed systems design, data pipelines, hard algorithmic reasoning, edge cases, or deep debugging (Cost-optimal high reasoning).",
+                    "claude_sonnet": "Nuanced full-stack application code, frontend UI ergonomics, or highly stylistic prose.",
                     "gemini_flash": "Massive context window, broad document synthesis, repo-wide audits, or high-volume summarization."
                 }
             }
