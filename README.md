@@ -118,13 +118,40 @@ python3 -m jev_gateway.executor "Write a regex to match IPv6 addresses"
 ```
 
 ### 3. Drop-in OpenAI API Gateway Mode
-Launch the local proxy server:
+Launch the local proxy server (defaults to port 8080):
 ```bash
-python3 -m jev_gateway.server --port 8000
+python3 server.py
 ```
-Then configure **Aider**, **Cursor**, or **Continue.dev** to point to `http://localhost:8000/v1`:
+Then configure **Cursor**, **Aider**, **Continue.dev**, or any Python OpenAI client:
 ```bash
-aider --openai-api-base http://localhost:8000/v1 --model custom
+export OPENAI_BASE_URL="http://localhost:8080/v1"
+export OPENAI_API_KEY="dummy" # Handled internally by Jev Gateway
+```
+
+---
+
+## 🐳 Docker Containerization (Optional)
+
+You can containerize and run `jev-gateway` anywhere using Docker or Docker Compose.
+
+### Option A: Docker Compose (Recommended)
+```bash
+docker compose up -d
+```
+This automatically mounts your local Obsidian Vault for knowledge RAG & write-back, and exposes the OpenAI-compatible proxy on `http://localhost:8080`.
+
+### Option B: Raw Docker CLI
+```bash
+# Build the lightweight image
+docker build -t jev-gateway:latest .
+
+# Run the container
+docker run -d \
+  -p 8080:8080 \
+  -e JEV_API_KEY="your_jev_api_key" \
+  -e OPENROUTER_API_KEY="your_openrouter_api_key" \
+  --name jev-gateway \
+  jev-gateway:latest
 ```
 
 ---
