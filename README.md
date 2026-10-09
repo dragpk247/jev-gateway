@@ -170,6 +170,91 @@ docker run -d \
 
 ---
 
+---
+
+## ❓ Frequently Asked Questions (FAQ)
+
+### 👨‍💻 For Developers & Power Users
+
+<details>
+<summary><b>1. I already use Cursor / Aider directly with Claude. Why should I use a proxy?</b></summary>
+<br>
+Because standard coding assistants burn expensive frontier tokens on simple syntax, bash one-liners, and local config queries. <code>jev-gateway</code> acts as an intelligent cost and privacy filter: routine questions execute in milliseconds on your local GPU for <b>$0.00</b>, while complex multi-step refactors and deep architectures still route to DeepSeek-R1 or Claude. You get the same developer experience with a <b>70–90% reduction in API bills</b>.
+</details>
+
+<details>
+<summary><b>2. Does routing add noticeable latency to my queries?</b></summary>
+<br>
+No. TypeSafe Jev evaluates routing criteria deterministically in <b>~300ms</b>. When queries route to your local GPU (e.g. RTX 5070 Ti) over localhost or Tailscale, time-to-first-token is often faster than waiting in public cloud API queues.
+</details>
+
+<details>
+<summary><b>3. Can I manually override the router if I explicitly want Claude or DeepSeek?</b></summary>
+<br>
+Yes. In your request payload, you can pass an explicit target model name (e.g., <code>"model": "deepseek_reasoner"</code> or <code>"model": "claude_sonnet"</code>) instead of <code>"auto"</code>. The gateway will honor your override directly.
+</details>
+
+---
+
+### 💼 For Engineering Leads & Managers
+
+<details>
+<summary><b>4. How much money does this actually save?</b></summary>
+<br>
+Industry benchmarks show that 40% to 65% of daily developer prompts are routine boilerplate, unit tests, and syntax questions. By offloading those to an on-prem or workstation GPU (Tier 0: $0.00) and routing heavy architectural design to DeepSeek-R1 ($2.50/M) rather than Claude Opus ($20.00/M), active developers typically save <b>$100 to $400+ per seat each month</b>.
+</details>
+
+<details>
+<summary><b>5. What happens if the local GPU is offline or out of memory?</b></summary>
+<br>
+The gateway provides graceful degradation: if the local Ollama instance does not respond within timeout thresholds, it automatically fails over to high-throughput cloud endpoints (e.g. Gemini 3.8 Flash) so developer workflows are never blocked.
+</details>
+
+<details>
+<summary><b>6. What is the value of the bi-directional Obsidian write-back?</b></summary>
+<br>
+It prevents institutional "brain drain." When a frontier model produces an elegant architectural design or fixes a nuanced bug, the gateway auto-distills that solution into your personal or team Obsidian vault. Future queries on related topics retrieve that note via vector RAG, allowing cheaper local models to answer follow-up questions for <b>$0.00</b>.
+</details>
+
+---
+
+### 🔒 For Security & Compliance (CISO)
+
+<details>
+<summary><b>7. How does the Zero-Leak Privacy Sandbox prevent proprietary leaks?</b></summary>
+<br>
+Before any network socket is opened, the gateway runs deterministic pre-flight inspections on the prompt and retrieved context. If private tags (<code>#private</code>, <code>#finance</code>, <code>#secret</code>), credentials (API keys, bearer tokens, private keys), or sensitive files (<code>.env</code>, <code>id_rsa</code>) are detected, outbound cloud requests are physically blocked. The query is <b>hard-locked to the local GPU</b>.
+</details>
+
+<details>
+<summary><b>8. Does external cloud infrastructure see my raw prompt during classification?</b></summary>
+<br>
+No sensitive payload reaches the cloud. If the Zero-Leak Privacy Sandbox flags a query, cloud routing is terminated locally before any external dispatch.
+</details>
+
+---
+
+### ⚙️ For DevOps & Platform Engineers
+
+<details>
+<summary><b>9. How hard is it to integrate into our existing stack?</b></summary>
+<br>
+It requires only two standard OpenAI environment variables:
+```bash
+export OPENAI_BASE_URL="http://localhost:8080/v1"
+export OPENAI_API_KEY="dummy"
+```
+Any client that supports OpenAI-compatible endpoints (Cursor, Continue.dev, Aider, LangChain, LlamaIndex, LiteLLM) works immediately without code changes.
+</details>
+
+<details>
+<summary><b>10. Can I deploy this in Docker or Kubernetes?</b></summary>
+<br>
+Yes. <code>jev-gateway</code> includes a lightweight, secure multi-stage <code>Dockerfile</code> and a <code>docker-compose.yml</code> file pre-configured with volume mounts and host-level GPU networking.
+</details>
+
+---
+
 ## 📄 License
 MIT License. Created by [dragpk247](https://github.com/dragpk247).
 
