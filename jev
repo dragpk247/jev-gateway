@@ -42,6 +42,11 @@ case "$1" in
     curl -s http://localhost:$PORT/api/stats | python3 -m json.tool
     ;;
 
+  distill)
+    shift
+    "$PYTHON_BIN" "$GATEWAY_DIR/distill.py" "$@"
+    ;;
+
   "")
     echo "Usage: jev [command | 'your prompt']"
     echo ""
@@ -51,6 +56,8 @@ case "$1" in
     echo "  jev status           Check server status and health"
     echo "  jev dashboard        Open Web Telemetry Dashboard in browser"
     echo "  jev stats            Inspect token & dollar savings via CLI"
+    echo "  jev distill status   Show captured distillation traces & golden dataset"
+    echo "  jev distill export   Export golden training dataset (alpaca/sharegpt)"
     echo "  jev --exec <prompt>  Route and execute prompt directly via CLI"
     echo "  jev <prompt>         Dry-run route inspection"
     ;;

@@ -33,6 +33,7 @@ from main import (
     STATS_DB_PATH,
     CACHE_DB_PATH
 )
+from distill import harvest_async
 
 HOST = os.getenv("HOST", "0.0.0.0")
 PORT = int(os.getenv("PORT", "8085"))
@@ -411,9 +412,10 @@ class JevGatewayHandler(BaseHTTPRequestHandler):
                 ans_str = "".join(full_text)
                 record_stat(prompt, target, cached=False, privacy_locked=is_sensitive, tokens_in=len(prompt.split()), tokens_out=len(ans_str.split()), duration_s=dur)
 
-                # Obsidian Auto writeback
+                # Obsidian Auto writeback & Distillation Harvest
                 if target != "local_gpu" and ans_str and not ans_str.startswith("OpenRouter"):
                     write_back_to_obsidian(prompt, ans_str, target)
+                    harvest_async(prompt, ans_str, target, context, {"latency_s": dur, "stream": True})
                 return
 
             # 5. Standard Non-Streaming JSON Execution
@@ -427,6 +429,7 @@ class JevGatewayHandler(BaseHTTPRequestHandler):
 
             if target != "local_gpu" and response_text and not response_text.startswith("OpenRouter"):
                 write_back_to_obsidian(prompt, response_text, target)
+                harvest_async(prompt, response_text, target, context, {"latency_s": duration_s, "stream": False})
 
             response_payload = {
                 "id": f"chatcmpl-{uuid.uuid4().hex[:12]}",
