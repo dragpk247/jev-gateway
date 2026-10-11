@@ -604,3 +604,12 @@ if __name__ == "__main__":
         print("  python3 main.py 'your prompt'                        # Route & Inspect")
         print("  python3 main.py --exec 'your prompt'                 # Route & Execute")
         print("  python3 main.py --exec --save-vault 'your prompt'    # Execute & Auto-Save to Obsidian")
+
+# Export for Vercel root file scanners
+try:
+    from server import JevGatewayHandler
+    handler = JevGatewayHandler
+    app = JevGatewayHandler
+    application = JevGatewayHandler
+except Exception:
+    pass
