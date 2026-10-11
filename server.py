@@ -131,20 +131,24 @@ DASHBOARD_HTML = """<!DOCTYPE html>
       <div class="card-value" id="val-requests">--</div>
     </div>
     <div class="card">
-      <div class="card-title">Estimated Savings ($)</div>
+      <div class="card-title">Net Dollar Savings ($)</div>
       <div class="card-value" style="color: var(--success);" id="val-savings">--</div>
     </div>
     <div class="card">
-      <div class="card-title">FastPath Cache Hits</div>
+      <div class="card-title">Semantic Cache Hits</div>
       <div class="card-value" style="color: var(--warning);" id="val-cache">--</div>
     </div>
     <div class="card">
+      <div class="card-title">Golden Distill Samples</div>
+      <div class="card-value" style="color: var(--purple);" id="val-distill">--</div>
+    </div>
+    <div class="card">
       <div class="card-title">Privacy Interceptions</div>
-      <div class="card-value" style="color: var(--purple);" id="val-privacy">--</div>
+      <div class="card-value" style="color: #f85149;" id="val-privacy">--</div>
     </div>
   </div>
 
-  <h2>Recent Requests</h2>
+  <h2>Recent Requests & Failover Telemetry</h2>
   <table>
     <thead>
       <tr>
@@ -169,6 +173,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         document.getElementById('val-requests').innerText = data.total_requests;
         document.getElementById('val-savings').innerText = '$' + (data.total_savings_cents / 100).toFixed(2);
         document.getElementById('val-cache').innerText = data.cache_hits;
+        document.getElementById('val-distill').innerText = data.distill_golden || 0;
         document.getElementById('val-privacy').innerText = data.privacy_locks;
 
         const tbody = document.getElementById('logs-body');
@@ -259,11 +264,16 @@ class JevGatewayHandler(BaseHTTPRequestHandler):
                 }
                 for r in rows
             ]
+            from distill import get_stats as get_distill_stats
+            dstats = get_distill_stats()
+
             self._send_json(200, {
                 "total_requests": total_req,
                 "total_savings_cents": round(total_saved, 1),
                 "cache_hits": cache_hits,
                 "privacy_locks": priv_locks,
+                "distill_golden": dstats.get("golden_samples", 0),
+                "distill_raw": dstats.get("raw_traces", 0),
                 "recent_logs": recent
             })
         elif self.path in ("/v1/models", "/models"):
