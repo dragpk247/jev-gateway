@@ -276,11 +276,11 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
   <!-- Navigation Tabs -->
   <div class="tabs">
-    <button class="tab-btn active" onclick="switchTab('analytics', this)">📊 Real-Time Telemetry</button>
-    <button class="tab-btn" onclick="switchTab('playground', this)">⚡ Streaming Sandbox</button>
-    <button class="tab-btn" onclick="switchTab('cache', this)">💾 Semantic Memory</button>
-    <button class="tab-btn" onclick="switchTab('distill', this)">🧠 Distillation Vault</button>
-    <button class="tab-btn" onclick="switchTab('apikeys', this)">🔑 API Keys & Tenancy</button>
+    <button class="tab-btn active" data-tab="analytics" onclick="switchTab('analytics', this)">📊 Real-Time Telemetry</button>
+    <button class="tab-btn" data-tab="playground" onclick="switchTab('playground', this)">⚡ Streaming Sandbox</button>
+    <button class="tab-btn" data-tab="cache" onclick="switchTab('cache', this)">💾 Semantic Memory</button>
+    <button class="tab-btn" data-tab="distill" onclick="switchTab('distill', this)">🧠 Distillation Vault</button>
+    <button class="tab-btn" data-tab="apikeys" onclick="switchTab('apikeys', this)">🔑 API Keys & Tenancy</button>
   </div>
 
   <!-- Tab 1: Analytics -->
@@ -464,72 +464,86 @@ DASHBOARD_HTML = """<!DOCTYPE html>
   </div>
 
   <script>
+    function setTxt(id, val) {
+      const el = document.getElementById(id);
+      if (el) el.innerText = val;
+    }
+
     function switchTab(tab, btn) {
-      const tabs = ['analytics', 'playground', 'cache', 'distill', 'apikeys'];
-      tabs.forEach(t => {
-        const el = document.getElementById('tab-' + t);
-        if (el) el.style.display = (t === tab) ? 'block' : 'none';
-      });
-      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-      if (btn) {
-        btn.classList.add('active');
-      } else if (window.event && window.event.target) {
-        window.event.target.classList.add('active');
+      try {
+        const tabs = ['analytics', 'playground', 'cache', 'distill', 'apikeys'];
+        tabs.forEach(t => {
+          const el = document.getElementById('tab-' + t);
+          if (el) el.style.display = (t === tab) ? 'block' : 'none';
+        });
+        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+        if (btn && btn.classList) {
+          btn.classList.add('active');
+        } else {
+          const targetBtn = document.querySelector(`button[data-tab="${tab}"]`);
+          if (targetBtn) targetBtn.classList.add('active');
+        }
+        if (tab === 'cache') loadCache();
+        if (tab === 'apikeys') loadKeys();
+      } catch (e) {
+        console.error("Tab switch error:", e);
       }
-      if (tab === 'cache') loadCache();
-      if (tab === 'apikeys') loadKeys();
     }
 
     async function loadStats() {
       try {
         const res = await fetch('/api/stats');
+        if (!res.ok) throw new Error("Stats request returned " + res.status);
         const data = await res.json();
-        const savedDollars = data.total_savings_cents / 100;
-        const reqEl = document.getElementById('val-requests');
-        if (reqEl) reqEl.innerText = data.total_requests;
-        document.getElementById('val-savings').innerText = savedDollars >= 0.01 ? '$' + savedDollars.toFixed(2) : '$' + savedDollars.toFixed(4);
-        document.getElementById('val-cache').innerText = data.cache_hits;
-        document.getElementById('val-distill').innerText = data.distill_golden || 0;
-        document.getElementById('val-privacy').innerText = data.privacy_locks;
+        const savedDollars = (data.total_savings_cents || 0) / 100;
+        
+        setTxt('val-requests', data.total_requests || 0);
+        setTxt('val-savings', savedDollars >= 0.01 ? '$' + savedDollars.toFixed(2) : '$' + savedDollars.toFixed(4));
+        setTxt('val-cache', data.cache_hits || 0);
+        setTxt('val-distill', data.distill_golden || 0);
+        setTxt('val-privacy', data.privacy_locks || 0);
+        setTxt('distill-raw-card', data.distill_raw || 0);
+        setTxt('distill-golden-card', data.distill_golden || 0);
 
-        document.getElementById('distill-raw-card').innerText = data.distill_raw || 0;
-        document.getElementById('distill-golden-card').innerText = data.distill_golden || 0;
-
-        const reduction = data.total_requests > 0 ? (Math.min(94.2, 70 + (data.cache_hits * 4))).toFixed(1) : '78.5';
-        document.getElementById('val-reduction').innerText = reduction + '%';
-        document.getElementById('req-count-badge').innerText = data.total_requests + ' total logs indexed';
+        const reduction = (data.total_requests || 0) > 0 ? (Math.min(94.2, 70 + ((data.cache_hits || 0) * 4))).toFixed(1) : '78.5';
+        setTxt('val-reduction', reduction + '%');
+        setTxt('req-count-badge', (data.total_requests || 0) + ' total logs indexed');
 
         const tbody = document.getElementById('logs-body');
-        if (data.recent_logs.length === 0) {
-          tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; color: var(--text-muted);">No requests recorded yet.</td></tr>';
+        if (!tbody) return;
+        if (!data.recent_logs || data.recent_logs.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; color: var(--text-muted);">No requests recorded yet. Send your first prompt in the Streaming Sandbox!</td></tr>';
           return;
         }
 
         tbody.innerHTML = data.recent_logs.map(log => {
           let targetTag = `<span class="tag tag-local">${log.target}</span>`;
-          if (log.target.includes('deepseek')) targetTag = `<span class="tag tag-deepseek">${log.target}</span>`;
-          else if (log.target.includes('gemini')) targetTag = `<span class="tag tag-gemini">${log.target}</span>`;
+          if (log.target && log.target.includes('deepseek')) targetTag = `<span class="tag tag-deepseek">${log.target}</span>`;
+          else if (log.target && log.target.includes('gemini')) targetTag = `<span class="tag tag-gemini">${log.target}</span>`;
 
           const modeTag = log.cached ? '<span class="tag tag-cache">⚡ Cached</span>' : 
                           log.privacy_locked ? '<span class="tag tag-private">🔒 Private</span>' : 'Standard';
 
-          const savedItem = (log.saved_cents / 100);
+          const savedItem = ((log.saved_cents || 0) / 100);
           const savedStr = savedItem > 0 ? ('$' + savedItem.toFixed(4)) : '$0.00';
 
           return `
             <tr>
-              <td style="color: var(--text-muted); font-family: var(--font-mono); font-size: 12px;">${log.time.split(' ')[1] || log.time}</td>
-              <td style="max-width:320px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${log.prompt}</td>
+              <td style="color: var(--text-muted); font-family: var(--font-mono); font-size: 12px;">${log.time ? (log.time.split(' ')[1] || log.time) : '--'}</td>
+              <td style="max-width:320px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${log.prompt || ''}</td>
               <td>${targetTag}</td>
               <td>${modeTag}</td>
-              <td style="font-family: var(--font-mono);">${log.tokens_in + log.tokens_out}</td>
+              <td style="font-family: var(--font-mono);">${(log.tokens_in || 0) + (log.tokens_out || 0)}</td>
               <td style="font-family: var(--font-mono); color: var(--success); font-weight: 600;">${savedStr}</td>
-              <td style="font-family: var(--font-mono); color: var(--text-muted);">${log.duration_s}s</td>
+              <td style="font-family: var(--font-mono); color: var(--text-muted);">${log.duration_s || 0}s</td>
             </tr>
           `;
         }).join('');
       } catch (e) {
-        console.error(e);
+        console.error("loadStats error:", e);
+        setTxt('req-count-badge', 'Ready (0 indexed)');
+        const tbody = document.getElementById('logs-body');
+        if (tbody) tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; color: var(--text-muted);">Ready. No telemetry logs recorded yet.</td></tr>';
       }
     }
 
