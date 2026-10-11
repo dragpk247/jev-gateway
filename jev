@@ -44,7 +44,12 @@ case "$1" in
 
   distill)
     shift
-    "$PYTHON_BIN" "$GATEWAY_DIR/distill.py" "$@"
+    if [ "${1:-}" = "train" ]; then
+      shift
+      "$PYTHON_BIN" "$GATEWAY_DIR/train_local.py" "$@"
+    else
+      "$PYTHON_BIN" "$GATEWAY_DIR/distill.py" "$@"
+    fi
     ;;
 
   "")
@@ -58,6 +63,7 @@ case "$1" in
     echo "  jev stats            Inspect token & dollar savings via CLI"
     echo "  jev distill status   Show captured distillation traces & golden dataset"
     echo "  jev distill export   Export golden training dataset (alpaca/sharegpt)"
+    echo "  jev distill train    Generate and launch local LoRA fine-tuning"
     echo "  jev --exec <prompt>  Route and execute prompt directly via CLI"
     echo "  jev <prompt>         Dry-run route inspection"
     ;;
