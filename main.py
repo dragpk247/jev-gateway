@@ -190,22 +190,38 @@ def store_semantic_cache(prompt: str, response: str, target: str):
 
 def record_stat(prompt: str, target: str, cached: bool, privacy_locked: bool, tokens_in: int, tokens_out: int, duration_s: float):
     try:
-        # Approximate savings: if avoided cloud ($10/M tokens), calculate saved cents
-        saved_cents = 0.0
-        if cached:
-            saved_cents = (tokens_in + tokens_out) / 1000.0 * 1.5
-        elif target == "local_gpu":
-            saved_cents = (tokens_in + tokens_out) / 1000.0 * 1.0
+        # Industry Baseline: Claude 3.7 Sonnet / OpenAI GPT-4o
+        # Input: $3.00 / 1M tokens ($0.0003 / 1k)
+        # Output: $15.00 / 1M tokens ($0.0015 / 1k)
+        baseline_cost_cents = ((tokens_in * 3.0 / 1_000_000) + (tokens_out * 15.0 / 1_000_000)) * 100.0
+
+        actual_cost_cents = 0.0
+        if cached or target == "local_gpu":
+            actual_cost_cents = 0.0  # 100% Free
+        elif "deepseek_chat" in target:
+            # DeepSeek V3: $0.14 in / $0.28 out per 1M
+            actual_cost_cents = ((tokens_in * 0.14 / 1_000_000) + (tokens_out * 0.28 / 1_000_000)) * 100.0
+        elif "deepseek_reasoner" in target or "deepseek-r1" in target:
+            # DeepSeek R1: $0.55 in / $2.19 out per 1M (vs OpenAI o1 at $15 in / $60 out)
+            actual_cost_cents = ((tokens_in * 0.55 / 1_000_000) + (tokens_out * 2.19 / 1_000_000)) * 100.0
+        elif "gemini" in target:
+            # Gemini Flash: $0.10 in / $0.40 out per 1M
+            actual_cost_cents = ((tokens_in * 0.10 / 1_000_000) + (tokens_out * 0.40 / 1_000_000)) * 100.0
+        else:
+            # Frontier Claude or other fallback
+            actual_cost_cents = baseline_cost_cents
+
+        saved_cents = max(0.0, baseline_cost_cents - actual_cost_cents)
 
         conn = sqlite3.connect(STATS_DB_PATH)
         conn.execute("""
             INSERT INTO request_logs (prompt, target, cached, privacy_locked, tokens_in, tokens_out, saved_cents, duration_s)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """, (prompt[:150], target, cached, privacy_locked, tokens_in, tokens_out, round(saved_cents, 3), round(duration_s, 2)))
+        """, (prompt[:150], target, cached, privacy_locked, tokens_in, tokens_out, round(saved_cents, 4), round(duration_s, 2)))
         conn.commit()
         conn.close()
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[Stat Record Error]: {e}")
 
 def find_relevant_notes(query: str, top_k: int = 2) -> list:
     q_emb = get_embedding(query)

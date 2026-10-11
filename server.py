@@ -170,8 +170,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
       try {
         const res = await fetch('/api/stats');
         const data = await res.json();
-        document.getElementById('val-requests').innerText = data.total_requests;
-        document.getElementById('val-savings').innerText = '$' + (data.total_savings_cents / 100).toFixed(2);
+        const savedDollars = data.total_savings_cents / 100;
+        document.getElementById('val-savings').innerText = savedDollars >= 0.01 ? '$' + savedDollars.toFixed(2) : '$' + savedDollars.toFixed(4);
         document.getElementById('val-cache').innerText = data.cache_hits;
         document.getElementById('val-distill').innerText = data.distill_golden || 0;
         document.getElementById('val-privacy').innerText = data.privacy_locks;
