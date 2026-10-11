@@ -287,6 +287,11 @@ DASHBOARD_HTML = """<!DOCTYPE html>
   <div id="tab-analytics">
     <div class="grid">
       <div class="card">
+        <div class="card-title">Total Invocations</div>
+        <div class="card-value" style="color: var(--accent);" id="val-requests">--</div>
+        <div class="card-subtext">Optimized throughput</div>
+      </div>
+      <div class="card">
         <div class="card-title">Net Dollar Savings ($)</div>
         <div class="card-value" style="color: var(--success);" id="val-savings">--</div>
         <div class="card-subtext">vs. Direct Claude Sonnet / GPT-4o</div>
@@ -727,10 +732,20 @@ DASHBOARD_HTML = """<!DOCTYPE html>
       loadStats();
     }
 
-    loadStats();
-    loadCache();
-    loadKeys();
-    setInterval(loadStats, 3000);
+    document.addEventListener('DOMContentLoaded', () => {
+      // Bind tab buttons directly
+      document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          const tabName = btn.getAttribute('data-tab');
+          if (tabName) switchTab(tabName, btn);
+        });
+      });
+
+      loadStats();
+      loadCache();
+      loadKeys();
+      setInterval(loadStats, 3000);
+    });
   </script>
 </body>
 </html>
