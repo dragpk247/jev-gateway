@@ -735,9 +735,9 @@ class JevGatewayHandler(BaseHTTPRequestHandler):
 
     def _clean_path(self):
         p = self.path.split("?")[0]
-        # In case serverless rewrites prepend /api/index.py or similar
-        for prefix in ("/api/index.py", "/index.py"):
-            if p.startswith(prefix):
+        # In case serverless rewrites prepend /api/index.py, /api/index, or /index.py
+        for prefix in ("/api/index.py", "/api/index", "/index.py"):
+            if p == prefix or p.startswith(prefix + "/"):
                 p = p[len(prefix):] or "/"
         return p
 
