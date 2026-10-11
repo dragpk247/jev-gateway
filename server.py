@@ -276,11 +276,11 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
   <!-- Navigation Tabs -->
   <div class="tabs">
-    <button class="tab-btn active" data-tab="analytics" onclick="switchTab('analytics', this)">📊 Real-Time Telemetry</button>
-    <button class="tab-btn" data-tab="playground" onclick="switchTab('playground', this)">⚡ Streaming Sandbox</button>
-    <button class="tab-btn" data-tab="cache" onclick="switchTab('cache', this)">💾 Semantic Memory</button>
-    <button class="tab-btn" data-tab="distill" onclick="switchTab('distill', this)">🧠 Distillation Vault</button>
-    <button class="tab-btn" data-tab="apikeys" onclick="switchTab('apikeys', this)">🔑 API Keys & Tenancy</button>
+    <button id="btn-analytics" class="tab-btn active" data-tab="analytics" onclick="switchTab('analytics', this)">📊 Real-Time Telemetry</button>
+    <button id="btn-playground" class="tab-btn" data-tab="playground" onclick="switchTab('playground', this)">⚡ Streaming Sandbox</button>
+    <button id="btn-cache" class="tab-btn" data-tab="cache" onclick="switchTab('cache', this)">💾 Semantic Memory</button>
+    <button id="btn-distill" class="tab-btn" data-tab="distill" onclick="switchTab('distill', this)">🧠 Distillation Vault</button>
+    <button id="btn-apikeys" class="tab-btn" data-tab="apikeys" onclick="switchTab('apikeys', this)">🔑 API Keys & Tenancy</button>
   </div>
 
   <!-- Tab 1: Analytics -->
@@ -470,8 +470,10 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
   <script>
     function setTxt(id, val) {
-      const el = document.getElementById(id);
-      if (el) el.innerText = val;
+      try {
+        const el = document.getElementById(id);
+        if (el) el.innerText = val;
+      } catch (e) {}
     }
 
     function switchTab(tab, btn) {
@@ -482,12 +484,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
           if (el) el.style.display = (t === tab) ? 'block' : 'none';
         });
         document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-        if (btn && btn.classList) {
-          btn.classList.add('active');
-        } else {
-          const targetBtn = document.querySelector(`button[data-tab="${tab}"]`);
-          if (targetBtn) targetBtn.classList.add('active');
-        }
+        const activeBtn = btn || document.getElementById('btn-' + tab) || document.querySelector(`button[data-tab="${tab}"]`);
+        if (activeBtn) activeBtn.classList.add('active');
         if (tab === 'cache') loadCache();
         if (tab === 'apikeys') loadKeys();
       } catch (e) {
@@ -589,7 +587,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
           if (done) break;
 
           buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split('\n');
+          const lines = buffer.split('\\n');
           buffer = lines.pop(); // keep partial
 
           for (const line of lines) {
@@ -732,7 +730,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
       loadStats();
     }
 
-    document.addEventListener('DOMContentLoaded', () => {
+    function initDashboard() {
       // Bind tab buttons directly
       document.querySelectorAll('.tab-btn').forEach(btn => {
         btn.addEventListener('click', (e) => {
@@ -745,7 +743,13 @@ DASHBOARD_HTML = """<!DOCTYPE html>
       loadCache();
       loadKeys();
       setInterval(loadStats, 3000);
-    });
+    }
+
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', initDashboard);
+    } else {
+      initDashboard();
+    }
   </script>
 </body>
 </html>
@@ -786,7 +790,10 @@ class JevGatewayHandler(BaseHTTPRequestHandler):
             elif clean_path in ("/dashboard", "/"):
                 body = DASHBOARD_HTML.encode("utf-8")
                 self.send_response(200)
-                self.send_header("Content-Type", "text/html")
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+                self.send_header("Pragma", "no-cache")
+                self.send_header("Expires", "0")
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
                 self.wfile.write(body)
