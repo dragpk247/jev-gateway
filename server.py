@@ -1110,10 +1110,8 @@ def run_server():
         print("\nShutting down server...")
         httpd.server_close()
 
-# Top-level exports for Vercel Python runtime autodetection
+# Top-level export for Vercel Python runtime
 handler = JevGatewayHandler
-app = JevGatewayHandler
-application = JevGatewayHandler
 
 if __name__ == "__main__":
     run_server()

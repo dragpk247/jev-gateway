@@ -609,7 +609,5 @@ if __name__ == "__main__":
 try:
     from server import JevGatewayHandler
     handler = JevGatewayHandler
-    app = JevGatewayHandler
-    application = JevGatewayHandler
 except Exception:
     pass
