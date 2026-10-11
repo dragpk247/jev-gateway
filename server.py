@@ -14,7 +14,7 @@ import json
 import time
 import uuid
 import sqlite3
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 
 # Import core engine from main
@@ -1133,7 +1133,8 @@ class JevGatewayHandler(BaseHTTPRequestHandler):
 
 def run_server():
     server_address = (HOST, PORT)
-    httpd = HTTPServer(server_address, JevGatewayHandler)
+    httpd = ThreadingHTTPServer(server_address, JevGatewayHandler)
+    httpd.daemon_threads = True
     print("=" * 65)
     print(f"🚀 Jev Gateway OpenAI API Server running on http://{HOST}:{PORT}")
     print(f"   - Web Dashboard:   http://{HOST}:{PORT}/dashboard")
