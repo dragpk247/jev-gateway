@@ -23,9 +23,13 @@ from datetime import datetime
 
 # Paths & Defaults
 DEFAULT_VAULT_DIR = Path.home() / "Documents" / "Obsidian Vault"
-DB_PATH = Path.home() / ".local" / "share" / "obsidian-ai-router" / "vault_index.db"
-CACHE_DB_PATH = Path.home() / ".local" / "share" / "obsidian-ai-router" / "semantic_cache.db"
-STATS_DB_PATH = Path.home() / ".local" / "share" / "obsidian-ai-router" / "gateway_stats.db"
+BASE_DATA_DIR = Path.home() / ".local" / "share" / "obsidian-ai-router"
+if os.getenv("VERCEL") or os.getenv("AWS_LAMBDA_FUNCTION_NAME"):
+    BASE_DATA_DIR = Path("/tmp") / "obsidian-ai-router"
+
+DB_PATH = BASE_DATA_DIR / "vault_index.db"
+CACHE_DB_PATH = BASE_DATA_DIR / "semantic_cache.db"
+STATS_DB_PATH = BASE_DATA_DIR / "gateway_stats.db"
 KEY_FILE = Path.home() / ".config" / "jev" / "api_key"
 
 JEV_API_KEY = os.getenv("JEV_API_KEY") or (KEY_FILE.read_text().strip() if KEY_FILE.exists() else "")

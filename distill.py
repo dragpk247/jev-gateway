@@ -19,6 +19,9 @@ import threading
 from pathlib import Path
 
 DISTILL_DIR = Path.home() / ".config" / "jev" / "distill"
+if os.getenv("VERCEL") or os.getenv("AWS_LAMBDA_FUNCTION_NAME"):
+    DISTILL_DIR = Path("/tmp") / "jev" / "distill"
+
 RAW_TRACES_PATH = DISTILL_DIR / "raw_traces.jsonl"
 GOLDEN_DATASET_PATH = DISTILL_DIR / "training_golden.jsonl"
 STATS_PATH = DISTILL_DIR / "distill_stats.json"
