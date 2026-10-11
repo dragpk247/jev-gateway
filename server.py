@@ -276,11 +276,11 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
   <!-- Navigation Tabs -->
   <div class="tabs">
-    <button class="tab-btn active" onclick="switchTab('analytics')">📊 Real-Time Telemetry</button>
-    <button class="tab-btn" onclick="switchTab('playground')">⚡ Streaming Sandbox</button>
-    <button class="tab-btn" onclick="switchTab('cache')">💾 Semantic Memory</button>
-    <button class="tab-btn" onclick="switchTab('distill')">🧠 Distillation Vault</button>
-    <button class="tab-btn" onclick="switchTab('apikeys')">🔑 API Keys & Tenancy</button>
+    <button class="tab-btn active" onclick="switchTab('analytics', this)">📊 Real-Time Telemetry</button>
+    <button class="tab-btn" onclick="switchTab('playground', this)">⚡ Streaming Sandbox</button>
+    <button class="tab-btn" onclick="switchTab('cache', this)">💾 Semantic Memory</button>
+    <button class="tab-btn" onclick="switchTab('distill', this)">🧠 Distillation Vault</button>
+    <button class="tab-btn" onclick="switchTab('apikeys', this)">🔑 API Keys & Tenancy</button>
   </div>
 
   <!-- Tab 1: Analytics -->
@@ -464,12 +464,20 @@ DASHBOARD_HTML = """<!DOCTYPE html>
   </div>
 
   <script>
-    function switchTab(tab) {
-      document.getElementById('tab-analytics').style.display = tab === 'analytics' ? 'block' : 'none';
-      document.getElementById('tab-playground').style.display = tab === 'playground' ? 'block' : 'none';
-      document.getElementById('tab-distill').style.display = tab === 'distill' ? 'block' : 'none';
+    function switchTab(tab, btn) {
+      const tabs = ['analytics', 'playground', 'cache', 'distill', 'apikeys'];
+      tabs.forEach(t => {
+        const el = document.getElementById('tab-' + t);
+        if (el) el.style.display = (t === tab) ? 'block' : 'none';
+      });
       document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-      event.target.classList.add('active');
+      if (btn) {
+        btn.classList.add('active');
+      } else if (window.event && window.event.target) {
+        window.event.target.classList.add('active');
+      }
+      if (tab === 'cache') loadCache();
+      if (tab === 'apikeys') loadKeys();
     }
 
     async function loadStats() {
@@ -477,7 +485,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         const res = await fetch('/api/stats');
         const data = await res.json();
         const savedDollars = data.total_savings_cents / 100;
-        document.getElementById('val-requests').innerText = data.total_requests;
+        const reqEl = document.getElementById('val-requests');
+        if (reqEl) reqEl.innerText = data.total_requests;
         document.getElementById('val-savings').innerText = savedDollars >= 0.01 ? '$' + savedDollars.toFixed(2) : '$' + savedDollars.toFixed(4);
         document.getElementById('val-cache').innerText = data.cache_hits;
         document.getElementById('val-distill').innerText = data.distill_golden || 0;
