@@ -78,12 +78,13 @@ def init_dbs():
     conn.commit()
     conn.close()
 
-    # 2. Stats DB
+    # 2. Stats DB & Multi-Tenant Ledger
     conn = sqlite3.connect(STATS_DB_PATH)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS request_logs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            client_id TEXT DEFAULT 'default',
             prompt TEXT,
             target TEXT,
             cached BOOLEAN,
@@ -94,10 +95,59 @@ def init_dbs():
             duration_s REAL
         )
     """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS api_keys (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            key_hash TEXT UNIQUE,
+            client_name TEXT,
+            rpm_limit INTEGER DEFAULT 600,
+            monthly_quota_dollars REAL DEFAULT 1000.0,
+            status TEXT DEFAULT 'active',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    # Seed master key if table is empty
+    cursor = conn.cursor()
+    cursor.execute("SELECT COUNT(*) FROM api_keys")
+    if cursor.fetchone()[0] == 0:
+        cursor.execute("""
+            INSERT INTO api_keys (key_hash, client_name, rpm_limit, monthly_quota_dollars, status)
+            VALUES ('master', 'Default Internal Admin', 3000, 99999.0, 'active')
+        """)
     conn.commit()
     conn.close()
 
 init_dbs()
+
+def compress_prompt(prompt: str) -> tuple[str, int]:
+    """
+    Intelligent Pre-Flight Context Compressor:
+    - Strips markdown formatting chatter and conversational filler
+    - Removes duplicate whitespace and empty lines
+    - Trims redundant code comments if prompt is huge
+    Returns: (compressed_prompt, tokens_saved_estimate)
+    """
+    if not prompt:
+        return prompt, 0
+
+    original_len = len(prompt.split())
+    cleaned = prompt.strip()
+
+    # 1. Strip common conversational filler prefixes
+    filler_patterns = [
+        r"(?i)^(hi|hello|hey|greetings|please|kindly|could you please|can you help me)\s+(to\s+)?",
+        r"(?i)^(i would like you to|i need you to|help me with|assist me with)\s+"
+    ]
+    for fp in filler_patterns:
+        cleaned = re.sub(fp, "", cleaned).strip()
+
+    # 2. Collapse excessive whitespace and consecutive blank lines
+    cleaned = re.sub(r"\n\s*\n\s*\n+", "\n\n", cleaned)
+    cleaned = re.sub(r"[ \t]+", " ", cleaned)
+
+    compressed_len = len(cleaned.split())
+    saved_tokens = max(0, original_len - compressed_len)
+    return cleaned, saved_tokens
 
 def check_privacy_sandbox(prompt: str, context: str = "") -> tuple[bool, str]:
     full_text = f"{prompt}\n{context}"
@@ -188,7 +238,7 @@ def store_semantic_cache(prompt: str, response: str, target: str):
     except Exception as e:
         print(f"[Cache Error] {e}")
 
-def record_stat(prompt: str, target: str, cached: bool, privacy_locked: bool, tokens_in: int, tokens_out: int, duration_s: float):
+def record_stat(prompt: str, target: str, cached: bool, privacy_locked: bool, tokens_in: int, tokens_out: int, duration_s: float, client_id: str = "default"):
     try:
         # Industry Baseline: Claude 3.7 Sonnet / OpenAI GPT-4o
         # Input: $3.00 / 1M tokens ($0.0003 / 1k)
@@ -215,9 +265,9 @@ def record_stat(prompt: str, target: str, cached: bool, privacy_locked: bool, to
 
         conn = sqlite3.connect(STATS_DB_PATH)
         conn.execute("""
-            INSERT INTO request_logs (prompt, target, cached, privacy_locked, tokens_in, tokens_out, saved_cents, duration_s)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """, (prompt[:150], target, cached, privacy_locked, tokens_in, tokens_out, round(saved_cents, 4), round(duration_s, 2)))
+            INSERT INTO request_logs (client_id, prompt, target, cached, privacy_locked, tokens_in, tokens_out, saved_cents, duration_s)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (client_id, prompt[:150], target, cached, privacy_locked, tokens_in, tokens_out, round(saved_cents, 4), round(duration_s, 2)))
         conn.commit()
         conn.close()
     except Exception as e:

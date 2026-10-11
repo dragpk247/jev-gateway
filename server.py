@@ -30,6 +30,7 @@ from main import (
     record_stat,
     execute,
     execute_stream,
+    compress_prompt,
     STATS_DB_PATH,
     CACHE_DB_PATH
 )
@@ -647,9 +648,47 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         });
     }
 
-    function generateApiKey() {
-      const key = 'jev_live_' + Math.random().toString(36).substring(2, 10) + Math.random().toString(36).substring(2, 10);
-      alert('Provisioned new client key:\\n\\n' + key + '\\n\\nStore securely. Pass as Authorization: Bearer ' + key);
+    async function loadKeys() {
+      try {
+        const res = await fetch('/api/keys');
+        const data = await res.json();
+        const tbody = document.getElementById('keys-body');
+        if (!data || data.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color: var(--text-muted);">No API keys found.</td></tr>';
+          return;
+        }
+        tbody.innerHTML = data.map(k => `
+          <tr>
+            <td style="font-weight: 600;">${k.client_name}</td>
+            <td><code>${k.key_hash.substring(0, 14)}...</code></td>
+            <td style="font-family: var(--font-mono);">${k.rpm_limit} RPM</td>
+            <td style="font-family: var(--font-mono); color: var(--accent);">$${k.monthly_quota_dollars}/mo</td>
+            <td><span class="tag tag-local">${k.status.toUpperCase()}</span></td>
+          </tr>
+        `).join('');
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    async function generateApiKey() {
+      const clientName = prompt("Enter Client / Tenant Name:", "FinTech Partner Alpha");
+      if (!clientName) return;
+      const rpm = parseInt(prompt("Enter Rate Limit (Requests Per Minute):", "600")) || 600;
+      const quota = parseFloat(prompt("Enter Monthly Budget Cap ($):", "1500.0")) || 1500.0;
+
+      const res = await fetch('/api/keys', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ client_name: clientName, rpm_limit: rpm, monthly_quota_dollars: quota })
+      });
+      const data = await res.json();
+      if (data.key) {
+        prompt("New Client API Key provisioned! Copy this token:", data.key);
+        loadKeys();
+      } else {
+        alert("Failed to provision key: " + (data.error || "Unknown error"));
+      }
     }
 
     async function triggerDistillFilter() {
@@ -659,6 +698,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
     loadStats();
     loadCache();
+    loadKeys();
     setInterval(loadStats, 3000);
   </script>
 </body>
@@ -752,10 +792,52 @@ class JevGatewayHandler(BaseHTTPRequestHandler):
                 self._send_json(200, items)
             except Exception as e:
                 self._send_json(500, {"error": str(e)})
+        elif self.path == "/api/keys":
+            try:
+                conn = sqlite3.connect(STATS_DB_PATH)
+                c = conn.cursor()
+                c.execute("SELECT client_name, key_hash, rpm_limit, monthly_quota_dollars, status FROM api_keys ORDER BY id ASC")
+                rows = c.fetchall()
+                conn.close()
+                keys_data = [
+                    {
+                        "client_name": r[0],
+                        "key_hash": r[1],
+                        "rpm_limit": r[2],
+                        "monthly_quota_dollars": r[3],
+                        "status": r[4]
+                    }
+                    for r in rows
+                ]
+                self._send_json(200, keys_data)
+            except Exception as e:
+                self._send_json(500, {"error": str(e)})
         else:
             self._send_json(404, {"error": "Not Found"})
 
     def do_POST(self):
+        if self.path == "/api/keys":
+            try:
+                content_length = int(self.headers.get("Content-Length", 0))
+                body = self.rfile.read(content_length) if content_length > 0 else b"{}"
+                data = json.loads(body.decode("utf-8"))
+                client_name = data.get("client_name", "Enterprise Partner").strip()
+                rpm_limit = int(data.get("rpm_limit", 600))
+                monthly_quota = float(data.get("monthly_quota_dollars", 1500.0))
+
+                new_key = f"jev_live_{uuid.uuid4().hex[:18]}"
+                conn = sqlite3.connect(STATS_DB_PATH)
+                conn.execute("""
+                    INSERT INTO api_keys (key_hash, client_name, rpm_limit, monthly_quota_dollars, status)
+                    VALUES (?, ?, ?, ?, 'active')
+                """, (new_key, client_name, rpm_limit, monthly_quota))
+                conn.commit()
+                conn.close()
+                self._send_json(201, {"status": "ok", "key": new_key, "client_name": client_name})
+            except Exception as e:
+                self._send_json(500, {"error": str(e)})
+            return
+
         if self.path == "/api/cache/purge":
             try:
                 conn = sqlite3.connect(CACHE_DB_PATH)
@@ -766,7 +848,32 @@ class JevGatewayHandler(BaseHTTPRequestHandler):
             except Exception as e:
                 self._send_json(500, {"error": str(e)})
             return
+
         if self.path in ("/v1/chat/completions", "/chat/completions"):
+            # Multi-Tenant Client Authentication Gate
+            client_id = "default"
+            auth_header = self.headers.get("Authorization", "")
+            is_local = self.client_address[0] in ("127.0.0.1", "localhost") or "localhost" in self.headers.get("Host", "")
+
+            if auth_header.startswith("Bearer "):
+                token = auth_header[7:].strip()
+                conn = sqlite3.connect(STATS_DB_PATH)
+                c = conn.cursor()
+                c.execute("SELECT client_name, status FROM api_keys WHERE key_hash = ?", (token,))
+                row = c.fetchone()
+                conn.close()
+                if row:
+                    if row[1] != "active":
+                        self._send_json(403, {"error": "API Key is suspended or exceeded quota"})
+                        return
+                    client_id = row[0]
+                else:
+                    self._send_json(401, {"error": "Invalid API Key provided"})
+                    return
+            elif not is_local:
+                self._send_json(401, {"error": "Missing Authorization header. Provide 'Authorization: Bearer <key>'"})
+                return
+
             content_length = int(self.headers.get("Content-Length", 0))
             if content_length == 0:
                 self._send_json(400, {"error": "Empty payload"})
@@ -787,13 +894,16 @@ class JevGatewayHandler(BaseHTTPRequestHandler):
             stream = payload.get("stream", False)
 
             # Extract user prompt
-            prompt = ""
+            raw_prompt = ""
             for msg in reversed(messages):
                 if msg.get("role") == "user":
-                    prompt = msg.get("content", "")
+                    raw_prompt = msg.get("content", "")
                     break
-            if not prompt:
-                prompt = messages[-1].get("content", "")
+            if not raw_prompt:
+                raw_prompt = messages[-1].get("content", "")
+
+            # Intelligent Pre-Flight Context Compression
+            prompt, tokens_pruned = compress_prompt(raw_prompt)
 
             requested_model = payload.get("model", "auto")
 
@@ -803,7 +913,7 @@ class JevGatewayHandler(BaseHTTPRequestHandler):
                 cached_resp, cached_target = cached
                 t_in = len(prompt.split())
                 t_out = len(cached_resp.split())
-                record_stat(prompt, cached_target, cached=True, privacy_locked=False, tokens_in=t_in, tokens_out=t_out, duration_s=0.01)
+                record_stat(prompt, cached_target, cached=True, privacy_locked=False, tokens_in=t_in, tokens_out=t_out, duration_s=0.01, client_id=client_id)
 
                 if stream:
                     self.send_response(200)
@@ -829,7 +939,7 @@ class JevGatewayHandler(BaseHTTPRequestHandler):
                         "model": f"jev-gateway:{cached_target}",
                         "choices": [{"index": 0, "message": {"role": "assistant", "content": cached_resp}, "finish_reason": "stop"}],
                         "usage": {"prompt_tokens": t_in, "completion_tokens": t_out, "total_tokens": t_in + t_out},
-                        "gateway_metadata": {"routed_target": cached_target, "cached": True, "execution_latency_seconds": 0.01}
+                        "gateway_metadata": {"routed_target": cached_target, "cached": True, "execution_latency_seconds": 0.01, "tokens_pruned": tokens_pruned, "client_id": client_id}
                     }
                     self._send_json(200, response_payload)
                     return
@@ -856,7 +966,7 @@ class JevGatewayHandler(BaseHTTPRequestHandler):
                 latency = info.get("latency_ms", 0.0)
                 routing_note = f"Jev System One -> {target} ({conf:.0f}% conf in {latency:.1f}ms)"
 
-            print(f"[HTTP] Target: {target} | {routing_note}")
+            print(f"[HTTP] [{client_id}] Target: {target} | {routing_note} (Pruned tokens: {tokens_pruned})")
 
             # 4. Handle Streaming Response (SSE)
             if stream:
@@ -894,7 +1004,7 @@ class JevGatewayHandler(BaseHTTPRequestHandler):
 
                 dur = time.time() - t0
                 ans_str = "".join(full_text)
-                record_stat(prompt, target, cached=False, privacy_locked=is_sensitive, tokens_in=len(prompt.split()), tokens_out=len(ans_str.split()), duration_s=dur)
+                record_stat(prompt, target, cached=False, privacy_locked=is_sensitive, tokens_in=len(prompt.split()), tokens_out=len(ans_str.split()), duration_s=dur, client_id=client_id)
 
                 # Obsidian Auto writeback & Distillation Harvest
                 if target != "local_gpu" and ans_str and not ans_str.startswith("OpenRouter"):
@@ -909,7 +1019,7 @@ class JevGatewayHandler(BaseHTTPRequestHandler):
 
             t_in = len(prompt.split())
             t_out = len(response_text.split())
-            record_stat(prompt, target, cached=False, privacy_locked=is_sensitive, tokens_in=t_in, tokens_out=t_out, duration_s=duration_s)
+            record_stat(prompt, target, cached=False, privacy_locked=is_sensitive, tokens_in=t_in, tokens_out=t_out, duration_s=duration_s, client_id=client_id)
 
             if target != "local_gpu" and response_text and not response_text.startswith("OpenRouter"):
                 write_back_to_obsidian(prompt, response_text, target)
@@ -940,6 +1050,8 @@ class JevGatewayHandler(BaseHTTPRequestHandler):
                     "routing_details": routing_note,
                     "privacy_locked": is_sensitive,
                     "knowledge_injected": matched_notes,
+                    "tokens_pruned": tokens_pruned,
+                    "client_id": client_id,
                     "execution_latency_seconds": round(duration_s, 2)
                 }
             }
