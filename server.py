@@ -742,198 +742,266 @@ class JevGatewayHandler(BaseHTTPRequestHandler):
         return p
 
     def do_GET(self):
-        clean_path = self._clean_path()
-        if clean_path == "/health":
-            self._send_json(200, {"status": "ok", "service": "jev-gateway", "version": "1.1.0"})
-        elif clean_path in ("/dashboard", "/"):
-            body = DASHBOARD_HTML.encode("utf-8")
-            self.send_response(200)
-            self.send_header("Content-Type", "text/html")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
-        elif clean_path == "/api/stats":
-            conn = sqlite3.connect(STATS_DB_PATH)
-            c = conn.cursor()
-            c.execute("SELECT COUNT(*), COALESCE(SUM(saved_cents), 0), COALESCE(SUM(cached), 0), COALESCE(SUM(privacy_locked), 0) FROM request_logs")
-            total_req, total_saved, cache_hits, priv_locks = c.fetchone()
-            
-            c.execute("SELECT timestamp, prompt, target, cached, privacy_locked, tokens_in, tokens_out, duration_s FROM request_logs ORDER BY id DESC LIMIT 15")
-            rows = c.fetchall()
-            conn.close()
+        try:
+            clean_path = self._clean_path()
+            if clean_path == "/health":
+                self._send_json(200, {"status": "ok", "service": "jev-gateway", "version": "1.1.0"})
+            elif clean_path in ("/dashboard", "/"):
+                body = DASHBOARD_HTML.encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+            elif clean_path == "/api/stats":
+                try:
+                    conn = sqlite3.connect(STATS_DB_PATH)
+                    c = conn.cursor()
+                    c.execute("SELECT COUNT(*), COALESCE(SUM(saved_cents), 0), COALESCE(SUM(cached), 0), COALESCE(SUM(privacy_locked), 0) FROM request_logs")
+                    total_req, total_saved, cache_hits, priv_locks = c.fetchone()
+                    
+                    c.execute("SELECT timestamp, prompt, target, cached, privacy_locked, tokens_in, tokens_out, duration_s FROM request_logs ORDER BY id DESC LIMIT 15")
+                    rows = c.fetchall()
+                    conn.close()
 
-            recent = [
-                {
-                    "time": r[0],
-                    "prompt": r[1],
-                    "target": r[2],
-                    "cached": bool(r[3]),
-                    "privacy_locked": bool(r[4]),
-                    "tokens_in": r[5],
-                    "tokens_out": r[6],
-                    "duration_s": r[7]
+                    recent = [
+                        {
+                            "time": r[0],
+                            "prompt": r[1],
+                            "target": r[2],
+                            "cached": bool(r[3]),
+                            "privacy_locked": bool(r[4]),
+                            "tokens_in": r[5],
+                            "tokens_out": r[6],
+                            "duration_s": r[7]
+                        }
+                        for r in rows
+                    ]
+                except Exception:
+                    total_req, total_saved, cache_hits, priv_locks, recent = 0, 0.0, 0, 0, []
+
+                golden_count, raw_count = 0, 0
+                try:
+                    from distill import get_stats as get_distill_stats
+                    dstats = get_distill_stats()
+                    golden_count = dstats.get("golden_samples", 0)
+                    raw_count = dstats.get("raw_traces", 0)
+                except Exception:
+                    pass
+
+                self._send_json(200, {
+                    "total_requests": total_req,
+                    "total_savings_cents": round(total_saved, 1),
+                    "cache_hits": cache_hits,
+                    "privacy_locks": priv_locks,
+                    "distill_golden": golden_count,
+                    "distill_raw": raw_count,
+                    "recent_logs": recent
+                })
+            elif clean_path in ("/v1/models", "/models"):
+                model_data = {
+                    "object": "list",
+                    "data": [
+                        {"id": "auto", "object": "model", "created": int(time.time()), "owned_by": "jev-gateway"},
+                        {"id": "local_gpu", "object": "model", "created": int(time.time()), "owned_by": "ollama-qwen32b"},
+                        {"id": "deepseek_reasoner", "object": "model", "created": int(time.time()), "owned_by": "openrouter-r1"},
+                        {"id": "gemini_flash", "object": "model", "created": int(time.time()), "owned_by": "openrouter-gemini"},
+                        {"id": "claude_sonnet", "object": "model", "created": int(time.time()), "owned_by": "openrouter-claude"},
+                    ]
                 }
-                for r in rows
-            ]
-            from distill import get_stats as get_distill_stats
-            dstats = get_distill_stats()
-
-            self._send_json(200, {
-                "total_requests": total_req,
-                "total_savings_cents": round(total_saved, 1),
-                "cache_hits": cache_hits,
-                "privacy_locks": priv_locks,
-                "distill_golden": dstats.get("golden_samples", 0),
-                "distill_raw": dstats.get("raw_traces", 0),
-                "recent_logs": recent
-            })
-        elif clean_path in ("/v1/models", "/models"):
-            model_data = {
-                "object": "list",
-                "data": [
-                    {"id": "auto", "object": "model", "created": int(time.time()), "owned_by": "jev-gateway"},
-                    {"id": "local_gpu", "object": "model", "created": int(time.time()), "owned_by": "ollama-qwen32b"},
-                    {"id": "deepseek_reasoner", "object": "model", "created": int(time.time()), "owned_by": "openrouter-r1"},
-                    {"id": "gemini_flash", "object": "model", "created": int(time.time()), "owned_by": "openrouter-gemini"},
-                    {"id": "claude_sonnet", "object": "model", "created": int(time.time()), "owned_by": "openrouter-claude"},
-                ]
-            }
-            self._send_json(200, model_data)
-        elif clean_path == "/api/cache":
-            try:
-                conn = sqlite3.connect(CACHE_DB_PATH)
-                c = conn.cursor()
-                c.execute("SELECT id, prompt, target, created_at FROM semantic_cache ORDER BY id DESC LIMIT 50")
-                rows = c.fetchall()
-                conn.close()
-                items = [{"id": r[0], "prompt": r[1], "target": r[2], "created_at": r[3]} for r in rows]
-                self._send_json(200, items)
-            except Exception as e:
-                self._send_json(500, {"error": str(e)})
-        elif clean_path == "/api/keys":
-            try:
-                conn = sqlite3.connect(STATS_DB_PATH)
-                c = conn.cursor()
-                c.execute("SELECT client_name, key_hash, rpm_limit, monthly_quota_dollars, status FROM api_keys ORDER BY id ASC")
-                rows = c.fetchall()
-                conn.close()
-                keys_data = [
-                    {
-                        "client_name": r[0],
-                        "key_hash": r[1],
-                        "rpm_limit": r[2],
-                        "monthly_quota_dollars": r[3],
-                        "status": r[4]
-                    }
-                    for r in rows
-                ]
-                self._send_json(200, keys_data)
-            except Exception as e:
-                self._send_json(500, {"error": str(e)})
-        else:
-            self._send_json(404, {"error": "Not Found"})
+                self._send_json(200, model_data)
+            elif clean_path == "/api/cache":
+                try:
+                    conn = sqlite3.connect(CACHE_DB_PATH)
+                    c = conn.cursor()
+                    c.execute("SELECT id, prompt, target, created_at FROM semantic_cache ORDER BY id DESC LIMIT 50")
+                    rows = c.fetchall()
+                    conn.close()
+                    items = [{"id": r[0], "prompt": r[1], "target": r[2], "created_at": r[3]} for r in rows]
+                    self._send_json(200, items)
+                except Exception as e:
+                    self._send_json(500, {"error": str(e)})
+            elif clean_path == "/api/keys":
+                try:
+                    conn = sqlite3.connect(STATS_DB_PATH)
+                    c = conn.cursor()
+                    c.execute("SELECT client_name, key_hash, rpm_limit, monthly_quota_dollars, status FROM api_keys ORDER BY id ASC")
+                    rows = c.fetchall()
+                    conn.close()
+                    keys_data = [
+                        {
+                            "client_name": r[0],
+                            "key_hash": r[1],
+                            "rpm_limit": r[2],
+                            "monthly_quota_dollars": r[3],
+                            "status": r[4]
+                        }
+                        for r in rows
+                    ]
+                    self._send_json(200, keys_data)
+                except Exception as e:
+                    self._send_json(500, {"error": str(e)})
+            else:
+                self._send_json(404, {"error": "Not Found"})
+        except Exception as e:
+            self._send_json(500, {"error": "Internal Server Error", "details": str(e)})
 
     def do_POST(self):
-        clean_path = self._clean_path()
-        if clean_path == "/api/keys":
-            try:
-                content_length = int(self.headers.get("Content-Length", 0))
-                body = self.rfile.read(content_length) if content_length > 0 else b"{}"
-                data = json.loads(body.decode("utf-8"))
-                client_name = data.get("client_name", "Enterprise Partner").strip()
-                rpm_limit = int(data.get("rpm_limit", 600))
-                monthly_quota = float(data.get("monthly_quota_dollars", 1500.0))
+        try:
+            clean_path = self._clean_path()
+            if clean_path == "/api/keys":
+                try:
+                    content_length = int(self.headers.get("Content-Length", 0))
+                    body = self.rfile.read(content_length) if content_length > 0 else b"{}"
+                    data = json.loads(body.decode("utf-8"))
+                    client_name = data.get("client_name", "Enterprise Partner").strip()
+                    rpm_limit = int(data.get("rpm_limit", 600))
+                    monthly_quota = float(data.get("monthly_quota_dollars", 1500.0))
 
-                new_key = f"jev_live_{uuid.uuid4().hex[:18]}"
-                conn = sqlite3.connect(STATS_DB_PATH)
-                conn.execute("""
-                    INSERT INTO api_keys (key_hash, client_name, rpm_limit, monthly_quota_dollars, status)
-                    VALUES (?, ?, ?, ?, 'active')
-                """, (new_key, client_name, rpm_limit, monthly_quota))
-                conn.commit()
-                conn.close()
-                self._send_json(201, {"status": "ok", "key": new_key, "client_name": client_name})
-            except Exception as e:
-                self._send_json(500, {"error": str(e)})
-            return
+                    new_key = f"jev_live_{uuid.uuid4().hex[:18]}"
+                    conn = sqlite3.connect(STATS_DB_PATH)
+                    conn.execute("""
+                        INSERT INTO api_keys (key_hash, client_name, rpm_limit, monthly_quota_dollars, status)
+                        VALUES (?, ?, ?, ?, 'active')
+                    """, (new_key, client_name, rpm_limit, monthly_quota))
+                    conn.commit()
+                    conn.close()
+                    self._send_json(201, {"status": "ok", "key": new_key, "client_name": client_name})
+                except Exception as e:
+                    self._send_json(500, {"error": str(e)})
+                return
 
-        if clean_path == "/api/cache/purge":
-            try:
-                conn = sqlite3.connect(CACHE_DB_PATH)
-                conn.execute("DELETE FROM semantic_cache")
-                conn.commit()
-                conn.close()
-                self._send_json(200, {"status": "ok", "message": "Cache purged"})
-            except Exception as e:
-                self._send_json(500, {"error": str(e)})
-            return
+            if clean_path == "/api/cache/purge":
+                try:
+                    conn = sqlite3.connect(CACHE_DB_PATH)
+                    conn.execute("DELETE FROM semantic_cache")
+                    conn.commit()
+                    conn.close()
+                    self._send_json(200, {"status": "ok", "message": "Cache purged"})
+                except Exception as e:
+                    self._send_json(500, {"error": str(e)})
+                return
 
-        if clean_path in ("/v1/chat/completions", "/chat/completions"):
-            # Multi-Tenant Client Authentication Gate
-            client_id = "default"
-            auth_header = self.headers.get("Authorization", "")
-            is_local = self.client_address[0] in ("127.0.0.1", "localhost") or "localhost" in self.headers.get("Host", "")
+            if clean_path in ("/v1/chat/completions", "/chat/completions"):
+                # Multi-Tenant Client Authentication Gate
+                client_id = "default"
+                auth_header = self.headers.get("Authorization", "")
+                is_local = self.client_address[0] in ("127.0.0.1", "localhost") or "localhost" in self.headers.get("Host", "")
 
-            if auth_header.startswith("Bearer "):
-                token = auth_header[7:].strip()
-                conn = sqlite3.connect(STATS_DB_PATH)
-                c = conn.cursor()
-                c.execute("SELECT client_name, status FROM api_keys WHERE key_hash = ?", (token,))
-                row = c.fetchone()
-                conn.close()
-                if row:
-                    if row[1] != "active":
-                        self._send_json(403, {"error": "API Key is suspended or exceeded quota"})
+                if auth_header.startswith("Bearer "):
+                    token = auth_header[7:].strip()
+                    conn = sqlite3.connect(STATS_DB_PATH)
+                    c = conn.cursor()
+                    c.execute("SELECT client_name, status FROM api_keys WHERE key_hash = ?", (token,))
+                    row = c.fetchone()
+                    conn.close()
+                    if row:
+                        if row[1] != "active":
+                            self._send_json(403, {"error": "API Key is suspended or exceeded quota"})
+                            return
+                        client_id = row[0]
+                    else:
+                        self._send_json(401, {"error": "Invalid API Key provided"})
                         return
-                    client_id = row[0]
-                else:
-                    self._send_json(401, {"error": "Invalid API Key provided"})
+                elif not is_local:
+                    self._send_json(401, {"error": "Missing Authorization header. Provide 'Authorization: Bearer <key>'"})
                     return
-            elif not is_local:
-                self._send_json(401, {"error": "Missing Authorization header. Provide 'Authorization: Bearer <key>'"})
-                return
 
-            content_length = int(self.headers.get("Content-Length", 0))
-            if content_length == 0:
-                self._send_json(400, {"error": "Empty payload"})
-                return
+                content_length = int(self.headers.get("Content-Length", 0))
+                if content_length == 0:
+                    self._send_json(400, {"error": "Empty payload"})
+                    return
 
-            body = self.rfile.read(content_length)
-            try:
-                payload = json.loads(body.decode("utf-8"))
-            except Exception as e:
-                self._send_json(400, {"error": f"Invalid JSON: {e}"})
-                return
+                body = self.rfile.read(content_length)
+                try:
+                    payload = json.loads(body.decode("utf-8"))
+                except Exception as e:
+                    self._send_json(400, {"error": f"Invalid JSON: {e}"})
+                    return
 
-            messages = payload.get("messages", [])
-            if not messages:
-                self._send_json(400, {"error": "Missing 'messages' array"})
-                return
+                messages = payload.get("messages", [])
+                if not messages:
+                    self._send_json(400, {"error": "Missing 'messages' array"})
+                    return
 
-            stream = payload.get("stream", False)
+                stream = payload.get("stream", False)
 
-            # Extract user prompt
-            raw_prompt = ""
-            for msg in reversed(messages):
-                if msg.get("role") == "user":
-                    raw_prompt = msg.get("content", "")
-                    break
-            if not raw_prompt:
-                raw_prompt = messages[-1].get("content", "")
+                # Extract user prompt
+                raw_prompt = ""
+                for msg in reversed(messages):
+                    if msg.get("role") == "user":
+                        raw_prompt = msg.get("content", "")
+                        break
+                if not raw_prompt:
+                    raw_prompt = messages[-1].get("content", "")
 
-            # Intelligent Pre-Flight Context Compression
-            prompt, tokens_pruned = compress_prompt(raw_prompt)
+                # Intelligent Pre-Flight Context Compression
+                prompt, tokens_pruned = compress_prompt(raw_prompt)
 
-            requested_model = payload.get("model", "auto")
+                requested_model = payload.get("model", "auto")
 
-            # 0. Check FastPath Semantic Cache
-            cached = check_semantic_cache(prompt)
-            if cached:
-                cached_resp, cached_target = cached
-                t_in = len(prompt.split())
-                t_out = len(cached_resp.split())
-                record_stat(prompt, cached_target, cached=True, privacy_locked=False, tokens_in=t_in, tokens_out=t_out, duration_s=0.01, client_id=client_id)
+                # 0. Check FastPath Semantic Cache
+                cached = check_semantic_cache(prompt)
+                if cached:
+                    cached_resp, cached_target = cached
+                    t_in = len(prompt.split())
+                    t_out = len(cached_resp.split())
+                    record_stat(prompt, cached_target, cached=True, privacy_locked=False, tokens_in=t_in, tokens_out=t_out, duration_s=0.01, client_id=client_id)
 
+                    if stream:
+                        self.send_response(200)
+                        self.send_header("Content-Type", "text/event-stream")
+                        self.send_header("Cache-Control", "no-cache")
+                        self.send_header("Connection", "keep-alive")
+                        self.send_header("Access-Control-Allow-Origin", "*")
+                        self.end_headers()
+                        chunk = {
+                            "id": f"chatcmpl-{uuid.uuid4().hex[:12]}",
+                            "object": "chat.completion.chunk",
+                            "created": int(time.time()),
+                            "model": f"jev-gateway:{cached_target}",
+                            "choices": [{"index": 0, "delta": {"content": cached_resp}, "finish_reason": "stop"}]
+                        }
+                        self.wfile.write(f"data: {json.dumps(chunk)}\n\ndata: [DONE]\n\n".encode("utf-8"))
+                        return
+                    else:
+                        response_payload = {
+                            "id": f"chatcmpl-{uuid.uuid4().hex[:12]}",
+                            "object": "chat.completion",
+                            "created": int(time.time()),
+                            "model": f"jev-gateway:{cached_target}",
+                            "choices": [{"index": 0, "message": {"role": "assistant", "content": cached_resp}, "finish_reason": "stop"}],
+                            "usage": {"prompt_tokens": t_in, "completion_tokens": t_out, "total_tokens": t_in + t_out},
+                            "gateway_metadata": {"routed_target": cached_target, "cached": True, "execution_latency_seconds": 0.01, "tokens_pruned": tokens_pruned, "client_id": client_id}
+                        }
+                        self._send_json(200, response_payload)
+                        return
+
+                # 1. RAG Context Lookup
+                matches = find_relevant_notes(prompt, top_k=2)
+                matched_notes = [m[1] for m in matches if m[0] > 0.62]
+                context = "\n\n".join([f"--- Note: {m[1]} ---\n{m[3][:800]}" for m in matches if m[0] > 0.62])
+
+                # 2. Zero-Leak Privacy Sandbox Guardrail
+                is_sensitive, reason = check_privacy_sandbox(prompt, context)
+
+                # 3. Router Target Resolution
+                if is_sensitive:
+                    target = "local_gpu"
+                    routing_note = f"Hard-locked to Local GPU (Privacy Sandbox: {reason})"
+                elif requested_model != "auto" and requested_model in ("local_gpu", "deepseek_reasoner", "gemini_flash", "claude_sonnet"):
+                    target = requested_model
+                    routing_note = f"Explicit override: {requested_model}"
+                else:
+                    info = query_jev_classifier(prompt)
+                    target = info.get("decision", "local_gpu")
+                    conf = info.get("confidence", 1.0) * 100
+                    latency = info.get("latency_ms", 0.0)
+                    routing_note = f"Jev System One -> {target} ({conf:.0f}% conf in {latency:.1f}ms)"
+
+                print(f"[HTTP] [{client_id}] Target: {target} | {routing_note} (Pruned tokens: {tokens_pruned})")
+
+                # 4. Handle Streaming Response (SSE)
                 if stream:
                     self.send_response(200)
                     self.send_header("Content-Type", "text/event-stream")
@@ -941,142 +1009,90 @@ class JevGatewayHandler(BaseHTTPRequestHandler):
                     self.send_header("Connection", "keep-alive")
                     self.send_header("Access-Control-Allow-Origin", "*")
                     self.end_headers()
-                    chunk = {
-                        "id": f"chatcmpl-{uuid.uuid4().hex[:12]}",
-                        "object": "chat.completion.chunk",
-                        "created": int(time.time()),
-                        "model": f"jev-gateway:{cached_target}",
-                        "choices": [{"index": 0, "delta": {"content": cached_resp}, "finish_reason": "stop"}]
-                    }
-                    self.wfile.write(f"data: {json.dumps(chunk)}\n\ndata: [DONE]\n\n".encode("utf-8"))
-                    return
-                else:
-                    response_payload = {
-                        "id": f"chatcmpl-{uuid.uuid4().hex[:12]}",
-                        "object": "chat.completion",
-                        "created": int(time.time()),
-                        "model": f"jev-gateway:{cached_target}",
-                        "choices": [{"index": 0, "message": {"role": "assistant", "content": cached_resp}, "finish_reason": "stop"}],
-                        "usage": {"prompt_tokens": t_in, "completion_tokens": t_out, "total_tokens": t_in + t_out},
-                        "gateway_metadata": {"routed_target": cached_target, "cached": True, "execution_latency_seconds": 0.01, "tokens_pruned": tokens_pruned, "client_id": client_id}
-                    }
-                    self._send_json(200, response_payload)
-                    return
 
-            # 1. RAG Context Lookup
-            matches = find_relevant_notes(prompt, top_k=2)
-            matched_notes = [m[1] for m in matches if m[0] > 0.62]
-            context = "\n\n".join([f"--- Note: {m[1]} ---\n{m[3][:800]}" for m in matches if m[0] > 0.62])
+                    full_text = []
+                    t0 = time.time()
+                    for token in execute_stream(target, prompt, context):
+                        full_text.append(token)
+                        chunk = {
+                            "id": f"chatcmpl-{uuid.uuid4().hex[:12]}",
+                            "object": "chat.completion.chunk",
+                            "created": int(time.time()),
+                            "model": f"jev-gateway:{target}",
+                            "choices": [{"index": 0, "delta": {"content": token}, "finish_reason": None}]
+                        }
+                        self.wfile.write(f"data: {json.dumps(chunk)}\n\n".encode("utf-8"))
+                        self.wfile.flush()
 
-            # 2. Zero-Leak Privacy Sandbox Guardrail
-            is_sensitive, reason = check_privacy_sandbox(prompt, context)
-
-            # 3. Router Target Resolution
-            if is_sensitive:
-                target = "local_gpu"
-                routing_note = f"Hard-locked to Local GPU (Privacy Sandbox: {reason})"
-            elif requested_model != "auto" and requested_model in ("local_gpu", "deepseek_reasoner", "gemini_flash", "claude_sonnet"):
-                target = requested_model
-                routing_note = f"Explicit override: {requested_model}"
-            else:
-                info = query_jev_classifier(prompt)
-                target = info.get("decision", "local_gpu")
-                conf = info.get("confidence", 1.0) * 100
-                latency = info.get("latency_ms", 0.0)
-                routing_note = f"Jev System One -> {target} ({conf:.0f}% conf in {latency:.1f}ms)"
-
-            print(f"[HTTP] [{client_id}] Target: {target} | {routing_note} (Pruned tokens: {tokens_pruned})")
-
-            # 4. Handle Streaming Response (SSE)
-            if stream:
-                self.send_response(200)
-                self.send_header("Content-Type", "text/event-stream")
-                self.send_header("Cache-Control", "no-cache")
-                self.send_header("Connection", "keep-alive")
-                self.send_header("Access-Control-Allow-Origin", "*")
-                self.end_headers()
-
-                full_text = []
-                t0 = time.time()
-                for token in execute_stream(target, prompt, context):
-                    full_text.append(token)
-                    chunk = {
+                    # Send completion chunk
+                    done_chunk = {
                         "id": f"chatcmpl-{uuid.uuid4().hex[:12]}",
                         "object": "chat.completion.chunk",
                         "created": int(time.time()),
                         "model": f"jev-gateway:{target}",
-                        "choices": [{"index": 0, "delta": {"content": token}, "finish_reason": None}]
+                        "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]
                     }
-                    self.wfile.write(f"data: {json.dumps(chunk)}\n\n".encode("utf-8"))
+                    self.wfile.write(f"data: {json.dumps(done_chunk)}\n\ndata: [DONE]\n\n".encode("utf-8"))
                     self.wfile.flush()
 
-                # Send completion chunk
-                done_chunk = {
+                    dur = time.time() - t0
+                    ans_str = "".join(full_text)
+                    record_stat(prompt, target, cached=False, privacy_locked=is_sensitive, tokens_in=len(prompt.split()), tokens_out=len(ans_str.split()), duration_s=dur, client_id=client_id)
+
+                    # Obsidian Auto writeback & Distillation Harvest
+                    if target != "local_gpu" and ans_str and not ans_str.startswith("OpenRouter"):
+                        write_back_to_obsidian(prompt, ans_str, target)
+                        harvest_async(prompt, ans_str, target, context, {"latency_s": dur, "stream": True})
+                    return
+
+                # 5. Standard Non-Streaming JSON Execution
+                t_start = time.time()
+                response_text = execute(target, prompt, context)
+                duration_s = time.time() - t_start
+
+                t_in = len(prompt.split())
+                t_out = len(response_text.split())
+                record_stat(prompt, target, cached=False, privacy_locked=is_sensitive, tokens_in=t_in, tokens_out=t_out, duration_s=duration_s, client_id=client_id)
+
+                if target != "local_gpu" and response_text and not response_text.startswith("OpenRouter"):
+                    write_back_to_obsidian(prompt, response_text, target)
+                    harvest_async(prompt, response_text, target, context, {"latency_s": duration_s, "stream": False})
+
+                response_payload = {
                     "id": f"chatcmpl-{uuid.uuid4().hex[:12]}",
-                    "object": "chat.completion.chunk",
+                    "object": "chat.completion",
                     "created": int(time.time()),
                     "model": f"jev-gateway:{target}",
-                    "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]
-                }
-                self.wfile.write(f"data: {json.dumps(done_chunk)}\n\ndata: [DONE]\n\n".encode("utf-8"))
-                self.wfile.flush()
-
-                dur = time.time() - t0
-                ans_str = "".join(full_text)
-                record_stat(prompt, target, cached=False, privacy_locked=is_sensitive, tokens_in=len(prompt.split()), tokens_out=len(ans_str.split()), duration_s=dur, client_id=client_id)
-
-                # Obsidian Auto writeback & Distillation Harvest
-                if target != "local_gpu" and ans_str and not ans_str.startswith("OpenRouter"):
-                    write_back_to_obsidian(prompt, ans_str, target)
-                    harvest_async(prompt, ans_str, target, context, {"latency_s": dur, "stream": True})
-                return
-
-            # 5. Standard Non-Streaming JSON Execution
-            t_start = time.time()
-            response_text = execute(target, prompt, context)
-            duration_s = time.time() - t_start
-
-            t_in = len(prompt.split())
-            t_out = len(response_text.split())
-            record_stat(prompt, target, cached=False, privacy_locked=is_sensitive, tokens_in=t_in, tokens_out=t_out, duration_s=duration_s, client_id=client_id)
-
-            if target != "local_gpu" and response_text and not response_text.startswith("OpenRouter"):
-                write_back_to_obsidian(prompt, response_text, target)
-                harvest_async(prompt, response_text, target, context, {"latency_s": duration_s, "stream": False})
-
-            response_payload = {
-                "id": f"chatcmpl-{uuid.uuid4().hex[:12]}",
-                "object": "chat.completion",
-                "created": int(time.time()),
-                "model": f"jev-gateway:{target}",
-                "choices": [
-                    {
-                        "index": 0,
-                        "message": {
-                            "role": "assistant",
-                            "content": response_text
-                        },
-                        "finish_reason": "stop"
+                    "choices": [
+                        {
+                            "index": 0,
+                            "message": {
+                                "role": "assistant",
+                                "content": response_text
+                            },
+                            "finish_reason": "stop"
+                        }
+                    ],
+                    "usage": {
+                        "prompt_tokens": t_in,
+                        "completion_tokens": t_out,
+                        "total_tokens": t_in + t_out
+                    },
+                    "gateway_metadata": {
+                        "routed_target": target,
+                        "routing_details": routing_note,
+                        "privacy_locked": is_sensitive,
+                        "knowledge_injected": matched_notes,
+                        "tokens_pruned": tokens_pruned,
+                        "client_id": client_id,
+                        "execution_latency_seconds": round(duration_s, 2)
                     }
-                ],
-                "usage": {
-                    "prompt_tokens": t_in,
-                    "completion_tokens": t_out,
-                    "total_tokens": t_in + t_out
-                },
-                "gateway_metadata": {
-                    "routed_target": target,
-                    "routing_details": routing_note,
-                    "privacy_locked": is_sensitive,
-                    "knowledge_injected": matched_notes,
-                    "tokens_pruned": tokens_pruned,
-                    "client_id": client_id,
-                    "execution_latency_seconds": round(duration_s, 2)
                 }
-            }
-            self._send_json(200, response_payload)
-        else:
-            self._send_json(404, {"error": "Endpoint not found"})
+                self._send_json(200, response_payload)
+            else:
+                self._send_json(404, {"error": "Endpoint not found"})
+        except Exception as e:
+            self._send_json(500, {"error": "Internal Server Error in POST handler", "details": str(e)})
 
 def run_server():
     server_address = (HOST, PORT)
