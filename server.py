@@ -733,17 +733,26 @@ class JevGatewayHandler(BaseHTTPRequestHandler):
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         self.end_headers()
 
+    def _clean_path(self):
+        p = self.path.split("?")[0]
+        # In case serverless rewrites prepend /api/index.py or similar
+        for prefix in ("/api/index.py", "/index.py"):
+            if p.startswith(prefix):
+                p = p[len(prefix):] or "/"
+        return p
+
     def do_GET(self):
-        if self.path == "/health":
+        clean_path = self._clean_path()
+        if clean_path == "/health":
             self._send_json(200, {"status": "ok", "service": "jev-gateway", "version": "1.1.0"})
-        elif self.path in ("/dashboard", "/"):
+        elif clean_path in ("/dashboard", "/"):
             body = DASHBOARD_HTML.encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "text/html")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
-        elif self.path == "/api/stats":
+        elif clean_path == "/api/stats":
             conn = sqlite3.connect(STATS_DB_PATH)
             c = conn.cursor()
             c.execute("SELECT COUNT(*), COALESCE(SUM(saved_cents), 0), COALESCE(SUM(cached), 0), COALESCE(SUM(privacy_locked), 0) FROM request_logs")
@@ -778,7 +787,7 @@ class JevGatewayHandler(BaseHTTPRequestHandler):
                 "distill_raw": dstats.get("raw_traces", 0),
                 "recent_logs": recent
             })
-        elif self.path in ("/v1/models", "/models"):
+        elif clean_path in ("/v1/models", "/models"):
             model_data = {
                 "object": "list",
                 "data": [
@@ -790,7 +799,7 @@ class JevGatewayHandler(BaseHTTPRequestHandler):
                 ]
             }
             self._send_json(200, model_data)
-        elif self.path == "/api/cache":
+        elif clean_path == "/api/cache":
             try:
                 conn = sqlite3.connect(CACHE_DB_PATH)
                 c = conn.cursor()
@@ -801,7 +810,7 @@ class JevGatewayHandler(BaseHTTPRequestHandler):
                 self._send_json(200, items)
             except Exception as e:
                 self._send_json(500, {"error": str(e)})
-        elif self.path == "/api/keys":
+        elif clean_path == "/api/keys":
             try:
                 conn = sqlite3.connect(STATS_DB_PATH)
                 c = conn.cursor()
@@ -825,7 +834,8 @@ class JevGatewayHandler(BaseHTTPRequestHandler):
             self._send_json(404, {"error": "Not Found"})
 
     def do_POST(self):
-        if self.path == "/api/keys":
+        clean_path = self._clean_path()
+        if clean_path == "/api/keys":
             try:
                 content_length = int(self.headers.get("Content-Length", 0))
                 body = self.rfile.read(content_length) if content_length > 0 else b"{}"
@@ -847,7 +857,7 @@ class JevGatewayHandler(BaseHTTPRequestHandler):
                 self._send_json(500, {"error": str(e)})
             return
 
-        if self.path == "/api/cache/purge":
+        if clean_path == "/api/cache/purge":
             try:
                 conn = sqlite3.connect(CACHE_DB_PATH)
                 conn.execute("DELETE FROM semantic_cache")
@@ -858,7 +868,7 @@ class JevGatewayHandler(BaseHTTPRequestHandler):
                 self._send_json(500, {"error": str(e)})
             return
 
-        if self.path in ("/v1/chat/completions", "/chat/completions"):
+        if clean_path in ("/v1/chat/completions", "/chat/completions"):
             # Multi-Tenant Client Authentication Gate
             client_id = "default"
             auth_header = self.headers.get("Authorization", "")
