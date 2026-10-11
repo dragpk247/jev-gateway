@@ -29,16 +29,26 @@ STATS_DB_PATH = Path.home() / ".local" / "share" / "obsidian-ai-router" / "gatew
 KEY_FILE = Path.home() / ".config" / "jev" / "api_key"
 
 JEV_API_KEY = os.getenv("JEV_API_KEY") or (KEY_FILE.read_text().strip() if KEY_FILE.exists() else "")
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
+OR_KEY_FILE = Path.home() / ".config" / "jev" / "openrouter_key"
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY") or (OR_KEY_FILE.read_text().strip() if OR_KEY_FILE.exists() else "")
 
 # Local / Tailscale Ollama Host
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://100.86.159.86:11434")
 
 # OpenRouter Models (verified active on OpenRouter)
 OPENROUTER_MODELS = {
-    "claude_sonnet": "anthropic/claude-sonnet-5.5",
+    "deepseek_chat": "deepseek/deepseek-chat",
     "deepseek_reasoner": "deepseek/deepseek-r1",
-    "gemini_flash": "google/gemini-3.8-flash"
+    "gemini_flash": "google/gemini-2.5-flash-lite",
+    "claude_sonnet": "anthropic/claude-sonnet-4.5"
+}
+
+# Multi-Provider Failover Chain: Primary -> Secondary -> Tertiary
+FAILOVER_CHAINS = {
+    "deepseek_chat": ["deepseek/deepseek-chat", "google/gemini-2.5-flash-lite", "local_gpu"],
+    "deepseek_reasoner": ["deepseek/deepseek-r1", "anthropic/claude-sonnet-4.5", "deepseek/deepseek-chat"],
+    "gemini_flash": ["google/gemini-2.5-flash-lite", "deepseek/deepseek-chat", "local_gpu"],
+    "claude_sonnet": ["anthropic/claude-sonnet-4.5", "deepseek/deepseek-r1", "deepseek/deepseek-chat"]
 }
 
 # Sensitive regex patterns for the Zero-Leak Privacy Sandbox
@@ -296,58 +306,98 @@ tags:
     filename.write_text(content, encoding="utf-8")
     return filename
 
+def validate_response_quality(response: str) -> tuple[bool, str]:
+    """Automated syntactic validation gate for generated code."""
+    if "```python" in response:
+        parts = response.split("```python")
+        for p in parts[1:]:
+            code = p.split("```")[0]
+            try:
+                import ast
+                ast.parse(code)
+            except SyntaxError as se:
+                return False, f"Python Syntax Error in generated code: {se}"
+    return True, "Valid"
+
 def execute(target: str, prompt: str, context: str = "") -> str:
     system_prompt = "You are an expert AI software engineer and system architect."
     if context:
         system_prompt += f"\n\n[Obsidian Context from Local Knowledge Base]:\n{context}"
 
+    # Build prioritized candidate models list with failover support
+    candidates = []
     if target == "local_gpu":
-        print(f"⚡ [Tier 0: Local RTX 5070 Ti] qwen2.5-coder:32b ($0.00)...")
-        url = f"{OLLAMA_HOST}/api/generate"
-        payload = {
-            "model": "qwen2.5-coder:32b",
-            "prompt": f"{system_prompt}\n\nUser: {prompt}\n\nAssistant:",
-            "stream": False
-        }
-        req = urllib.request.Request(url, data=json.dumps(payload).encode('utf-8'), headers={"Content-Type": "application/json"})
-        try:
-            with urllib.request.urlopen(req, timeout=60) as resp:
-                data = json.loads(resp.read().decode('utf-8'))
-                ans = data.get("response", "")
-                store_semantic_cache(prompt, ans, target)
-                return ans
-        except Exception as e:
-            return f"Local Ollama execution error: {e}"
-
+        candidates = ["local_gpu"]
+    elif target in FAILOVER_CHAINS:
+        candidates = FAILOVER_CHAINS[target]
     else:
-        model_slug = OPENROUTER_MODELS.get(target, "deepseek/deepseek-r1")
-        print(f"🌐 [Frontier Cloud via OpenRouter: {model_slug}]...")
-        url = "https://openrouter.ai/api/v1/chat/completions"
-        payload = {
-            "model": model_slug,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": prompt}
-            ]
-        }
-        req = urllib.request.Request(
-            url,
-            data=json.dumps(payload).encode('utf-8'),
-            headers={
-                "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-                "Content-Type": "application/json",
-                "HTTP-Referer": "https://github.com/dragpk247/jev-gateway",
-                "X-Title": "Jev Gateway"
+        candidates = [OPENROUTER_MODELS.get(target, "deepseek/deepseek-chat"), "google/gemini-2.5-flash-lite", "local_gpu"]
+
+    last_error = ""
+    for candidate in candidates:
+        if candidate == "local_gpu":
+            print(f"⚡ [Tier 0: Local RTX 5070 Ti] qwen2.5-coder:32b ($0.00)...")
+            url = f"{OLLAMA_HOST}/api/generate"
+            payload = {
+                "model": "qwen2.5-coder:32b",
+                "prompt": f"{system_prompt}\n\nUser: {prompt}\n\nAssistant:",
+                "stream": False
             }
-        )
-        try:
-            with urllib.request.urlopen(req, timeout=90) as resp:
-                data = json.loads(resp.read().decode('utf-8'))
-                ans = data.get("choices", [{}])[0].get("message", {}).get("content", "")
-                store_semantic_cache(prompt, ans, target)
-                return ans
-        except Exception as e:
-            return f"OpenRouter execution error: {e}"
+            req = urllib.request.Request(url, data=json.dumps(payload).encode('utf-8'), headers={"Content-Type": "application/json"})
+            try:
+                with urllib.request.urlopen(req, timeout=45) as resp:
+                    data = json.loads(resp.read().decode('utf-8'))
+                    ans = data.get("response", "")
+                    # Self-Healing Quality Check
+                    is_valid, msg = validate_response_quality(ans)
+                    if not is_valid:
+                        print(f"⚠️ [Validation Gate Failed]: {msg} -> Retrying on higher tier...")
+                        continue
+                    store_semantic_cache(prompt, ans, target)
+                    return ans
+            except Exception as e:
+                last_error = f"Local Ollama error: {e}"
+                print(f"⚠️ Local GPU unavailable ({e}), failing over...")
+                continue
+        else:
+            model_slug = candidate
+            print(f"🌐 [Cloud Router: {model_slug}] (Failover Chain)...")
+            url = "https://openrouter.ai/api/v1/chat/completions"
+            payload = {
+                "model": model_slug,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": prompt}
+                ]
+            }
+            req = urllib.request.Request(
+                url,
+                data=json.dumps(payload).encode('utf-8'),
+                headers={
+                    "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+                    "Content-Type": "application/json",
+                    "HTTP-Referer": "https://github.com/dragpk247/jev-gateway",
+                    "X-Title": "Jev Gateway"
+                }
+            )
+            try:
+                with urllib.request.urlopen(req, timeout=60) as resp:
+                    data = json.loads(resp.read().decode('utf-8'))
+                    ans = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+                    if ans:
+                        # Validation Gate
+                        is_valid, msg = validate_response_quality(ans)
+                        if not is_valid and candidate != candidates[-1]:
+                            print(f"⚠️ [Validation Gate Failed]: {msg} -> Trying failover model...")
+                            continue
+                        store_semantic_cache(prompt, ans, target)
+                        return ans
+            except Exception as e:
+                last_error = f"Provider error ({model_slug}): {e}"
+                print(f"⚠️ {model_slug} failed ({e}), executing automatic failover...")
+                continue
+
+    return f"Execution error across all failover providers: {last_error}"
 
 def execute_stream(target: str, prompt: str, context: str = ""):
     """
