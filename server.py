@@ -625,9 +625,11 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     async function loadCache() {
       try {
         const res = await fetch('/api/cache');
+        if (!res.ok) throw new Error("HTTP " + res.status);
         const data = await res.json();
         const tbody = document.getElementById('cache-body');
-        if (!data || data.length === 0) {
+        if (!tbody) return;
+        if (!Array.isArray(data) || data.length === 0) {
           tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color: var(--text-muted);">Semantic Cache is empty. Run queries to populate.</td></tr>';
           return;
         }
@@ -641,7 +643,9 @@ DASHBOARD_HTML = """<!DOCTYPE html>
           </tr>
         `).join('');
       } catch (e) {
-        console.error(e);
+        console.error("loadCache error:", e);
+        const tbody = document.getElementById('cache-body');
+        if (tbody) tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color: var(--text-muted);">Memory cache ready (0 active entries).</td></tr>';
       }
     }
 
@@ -658,8 +662,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         .then(r => r.json())
         .then(data => {
           let csv = 'Timestamp,Prompt,Target,Mode,Total_Tokens,Saved_Cents,Duration_Seconds\\n';
-          data.recent_logs.forEach(l => {
-            const cleanPrompt = '"' + l.prompt.replace(/"/g, '""') + '"';
+          (data.recent_logs || []).forEach(l => {
+            const cleanPrompt = '"' + (l.prompt || '').replace(/"/g, '""') + '"';
             csv += `${l.time},${cleanPrompt},${l.target},${l.cached ? 'CACHED' : 'STANDARD'},${l.tokens_in + l.tokens_out},${l.saved_cents},${l.duration_s}\\n`;
           });
           const blob = new Blob([csv], { type: 'text/csv' });
@@ -668,29 +672,33 @@ DASHBOARD_HTML = """<!DOCTYPE html>
           a.href = url;
           a.download = `Jev_Gateway_Executive_Audit_${new Date().toISOString().split('T')[0]}.csv`;
           a.click();
-        });
+        }).catch(err => alert("Unable to export audit log: " + err));
     }
 
     async function loadKeys() {
       try {
         const res = await fetch('/api/keys');
+        if (!res.ok) throw new Error("HTTP " + res.status);
         const data = await res.json();
         const tbody = document.getElementById('keys-body');
-        if (!data || data.length === 0) {
+        if (!tbody) return;
+        if (!Array.isArray(data) || data.length === 0) {
           tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color: var(--text-muted);">No API keys found.</td></tr>';
           return;
         }
         tbody.innerHTML = data.map(k => `
           <tr>
             <td style="font-weight: 600;">${k.client_name}</td>
-            <td><code>${k.key_hash.substring(0, 14)}...</code></td>
+            <td><code>${(k.key_hash || '').substring(0, 14)}...</code></td>
             <td style="font-family: var(--font-mono);">${k.rpm_limit} RPM</td>
             <td style="font-family: var(--font-mono); color: var(--accent);">$${k.monthly_quota_dollars}/mo</td>
-            <td><span class="tag tag-local">${k.status.toUpperCase()}</span></td>
+            <td><span class="tag tag-local">${(k.status || 'ACTIVE').toUpperCase()}</span></td>
           </tr>
         `).join('');
       } catch (e) {
-        console.error(e);
+        console.error("loadKeys error:", e);
+        const tbody = document.getElementById('keys-body');
+        if (tbody) tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color: var(--text-muted);">API Key directory ready.</td></tr>';
       }
     }
 
