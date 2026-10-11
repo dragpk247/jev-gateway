@@ -775,7 +775,18 @@ class JevGatewayHandler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def _clean_path(self):
-        p = self.path.split("?")[0]
+        # 1. Check for query parameter passed by Vercel rewrite
+        if "?" in self.path:
+            raw_path, query = self.path.split("?", 1)
+            params = urllib.parse.parse_qs(query)
+            if "__orig_path" in params and params["__orig_path"]:
+                orig = params["__orig_path"][0]
+                if orig:
+                    return orig.split("?")[0]
+        else:
+            raw_path = self.path
+
+        p = raw_path
         # In case serverless rewrites prepend /api/index.py, /api/index, or /index.py
         for prefix in ("/api/index.py", "/api/index", "/index.py"):
             if p == prefix or p.startswith(prefix + "/"):
