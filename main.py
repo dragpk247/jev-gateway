@@ -36,8 +36,27 @@ JEV_API_KEY = os.getenv("JEV_API_KEY") or (KEY_FILE.read_text().strip() if KEY_F
 OR_KEY_FILE = Path.home() / ".config" / "jev" / "openrouter_key"
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY") or (OR_KEY_FILE.read_text().strip() if OR_KEY_FILE.exists() else "")
 
-# Local / Tailscale Ollama Host
-OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://100.86.159.86:11434")
+# Local / Tailscale Ollama Hosts (with zero-latency loopback prioritized)
+DEFAULT_OLLAMA_HOSTS = [
+    os.getenv("OLLAMA_HOST"),
+    "http://127.0.0.1:11434",
+    "http://localhost:11434",
+    "http://100.86.159.86:11434"
+]
+OLLAMA_HOSTS = [h for h in dict.fromkeys(DEFAULT_OLLAMA_HOSTS) if h]
+OLLAMA_HOST = OLLAMA_HOSTS[0]
+
+def get_active_ollama_host(timeout: float = 2.0) -> str:
+    """Probe candidate Ollama hosts with fast timeout to eliminate connection hangs."""
+    for host in OLLAMA_HOSTS:
+        try:
+            req = urllib.request.Request(f"{host}/api/tags", headers={"User-Agent": "jev-gateway/1.1"})
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                if resp.status == 200:
+                    return host
+        except Exception:
+            continue
+    return OLLAMA_HOSTS[0]
 
 # OpenRouter Models (verified active on OpenRouter)
 OPENROUTER_MODELS = {
@@ -57,7 +76,8 @@ FAILOVER_CHAINS = {
 
 # Sensitive regex patterns for the Zero-Leak Privacy Sandbox
 PRIVACY_PATTERNS = [
-    re.compile(r"(?i)\b(api[_-]?key|secret|token|password|passwd|auth[_-]?header|bearer\s+[a-z0-9_\-\.]+)\b"),
+    re.compile(r"(?i)(api[_-]?key|secret|token|password|passwd|auth[_-]?header|bearer\s+[a-z0-9_\-\.]+)"),
+    re.compile(r"[a-zA-Z0-9+.-]+://[^/\s:@]+:[^/\s:@]+@[^\s/]+"), # Database & URI connection strings with embedded passwords
     re.compile(r"-----BEGIN (?:RSA|OPENSSH|EC|PGP)? PRIVATE KEY-----"),
     re.compile(r"(?i)\b(id_rsa|id_ed25519|\.env|credentials\.json)\b"),
     re.compile(r"#(private|confidential|secret|internal|finance|tax|vault)"),
@@ -406,8 +426,9 @@ def execute(target: str, prompt: str, context: str = "") -> str:
     last_error = ""
     for candidate in candidates:
         if candidate == "local_gpu":
-            print(f"⚡ [Tier 0: Local RTX 5070 Ti] qwen2.5-coder:32b ($0.00)...")
-            url = f"{OLLAMA_HOST}/api/generate"
+            host = get_active_ollama_host(timeout=2.0)
+            print(f"⚡ [Tier 0: Local RTX 5070 Ti] ({host}) qwen2.5-coder:32b ($0.00)...")
+            url = f"{host}/api/generate"
             payload = {
                 "model": "qwen2.5-coder:32b",
                 "prompt": f"{system_prompt}\n\nUser: {prompt}\n\nAssistant:",
@@ -415,7 +436,7 @@ def execute(target: str, prompt: str, context: str = "") -> str:
             }
             req = urllib.request.Request(url, data=json.dumps(payload).encode('utf-8'), headers={"Content-Type": "application/json"})
             try:
-                with urllib.request.urlopen(req, timeout=45) as resp:
+                with urllib.request.urlopen(req, timeout=30) as resp:
                     data = json.loads(resp.read().decode('utf-8'))
                     ans = data.get("response", "")
                     # Self-Healing Quality Check
@@ -426,8 +447,8 @@ def execute(target: str, prompt: str, context: str = "") -> str:
                     store_semantic_cache(prompt, ans, target)
                     return ans
             except Exception as e:
-                last_error = f"Local Ollama error: {e}"
-                print(f"⚠️ Local GPU unavailable ({e}), failing over...")
+                last_error = f"Local Ollama error ({host}): {e}"
+                print(f"⚠️ Local GPU unavailable at {host} ({e}), failing over...")
                 continue
         else:
             model_slug = candidate
@@ -451,7 +472,7 @@ def execute(target: str, prompt: str, context: str = "") -> str:
                 }
             )
             try:
-                with urllib.request.urlopen(req, timeout=60) as resp:
+                with urllib.request.urlopen(req, timeout=40) as resp:
                     data = json.loads(resp.read().decode('utf-8'))
                     ans = data.get("choices", [{}])[0].get("message", {}).get("content", "")
                     if ans:
@@ -469,81 +490,123 @@ def execute(target: str, prompt: str, context: str = "") -> str:
 
     return f"Execution error across all failover providers: {last_error}"
 
-def execute_stream(target: str, prompt: str, context: str = ""):
+def execute_stream(target: str, prompt: str, context: str = "", is_sensitive: bool = False):
     """
-    Generator yielding tokens in real-time for SSE streaming
+    Generator yielding tokens in real-time for SSE streaming with multi-provider failover.
     """
     system_prompt = "You are an expert AI software engineer and system architect."
     if context:
         system_prompt += f"\n\n[Obsidian Context from Local Knowledge Base]:\n{context}"
 
+    # Determine prioritized candidate execution list with failover support
+    candidates = []
     if target == "local_gpu":
-        url = f"{OLLAMA_HOST}/api/generate"
-        payload = {
-            "model": "qwen2.5-coder:32b",
-            "prompt": f"{system_prompt}\n\nUser: {prompt}\n\nAssistant:",
-            "stream": True
-        }
-        req = urllib.request.Request(url, data=json.dumps(payload).encode('utf-8'), headers={"Content-Type": "application/json"})
-        full_text = []
-        try:
-            with urllib.request.urlopen(req, timeout=90) as resp:
-                for line in resp:
-                    if not line:
-                        continue
-                    try:
-                        chunk = json.loads(line.decode('utf-8'))
-                        token = chunk.get("response", "")
-                        if token:
-                            full_text.append(token)
-                            yield token
-                    except Exception:
-                        continue
-            store_semantic_cache(prompt, "".join(full_text), target)
-        except Exception as e:
-            yield f"\n[Stream Error: {e}]"
+        candidates = ["local_gpu"]
+    elif target in FAILOVER_CHAINS:
+        candidates = FAILOVER_CHAINS[target]
     else:
-        model_slug = OPENROUTER_MODELS.get(target, "deepseek/deepseek-r1")
-        url = "https://openrouter.ai/api/v1/chat/completions"
-        payload = {
-            "model": model_slug,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": prompt}
-            ],
-            "stream": True
-        }
-        req = urllib.request.Request(
-            url,
-            data=json.dumps(payload).encode('utf-8'),
-            headers={
-                "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-                "Content-Type": "application/json",
-                "HTTP-Referer": "https://github.com/dragpk247/jev-gateway",
-                "X-Title": "Jev Gateway"
+        candidates = [OPENROUTER_MODELS.get(target, "deepseek/deepseek-chat"), "google/gemini-2.5-flash-lite", "local_gpu"]
+
+    last_error = ""
+    for candidate in candidates:
+        if candidate == "local_gpu":
+            host = get_active_ollama_host(timeout=2.0)
+            url = f"{host}/api/generate"
+            payload = {
+                "model": "qwen2.5-coder:32b",
+                "prompt": f"{system_prompt}\n\nUser: {prompt}\n\nAssistant:",
+                "stream": True
             }
-        )
-        full_text = []
-        try:
-            with urllib.request.urlopen(req, timeout=90) as resp:
-                for line in resp:
-                    line_str = line.decode('utf-8').strip()
-                    if not line_str.startswith("data: "):
-                        continue
-                    data_str = line_str[6:]
-                    if data_str == "[DONE]":
-                        break
-                    try:
-                        chunk = json.loads(data_str)
-                        delta = chunk.get("choices", [{}])[0].get("delta", {}).get("content", "")
-                        if delta:
-                            full_text.append(delta)
-                            yield delta
-                    except Exception:
-                        continue
-            store_semantic_cache(prompt, "".join(full_text), target)
-        except Exception as e:
-            yield f"\n[Stream Error: {e}]"
+            req = urllib.request.Request(url, data=json.dumps(payload).encode('utf-8'), headers={"Content-Type": "application/json"})
+            full_text = []
+            yielded_any = False
+            try:
+                with urllib.request.urlopen(req, timeout=30) as resp:
+                    for line in resp:
+                        if not line:
+                            continue
+                        try:
+                            chunk = json.loads(line.decode('utf-8'))
+                            token = chunk.get("response", "")
+                            if token:
+                                yielded_any = True
+                                full_text.append(token)
+                                yield token
+                        except Exception:
+                            continue
+                store_semantic_cache(prompt, "".join(full_text), target)
+                return
+            except Exception as e:
+                last_error = f"Local Ollama error ({host}): {e}"
+                if yielded_any:
+                    yield f"\n[Stream interrupted: {e}]"
+                    return
+                if is_sensitive:
+                    yield (
+                        "\n[🔒 Zero-Leak Privacy Sandbox Guardrail]\n\n"
+                        "Sensitive credentials or secret tokens were detected in your prompt. "
+                        "To guarantee zero cloud data leakage, execution was isolated strictly to local GPU.\n\n"
+                        f"However, local Ollama at {host} could not be reached ({e}).\n\n"
+                        "To complete execution locally on-prem:\n"
+                        "  1. Start Ollama: `ollama serve`\n"
+                        "  2. Verify models: `ollama list`\n\n"
+                        "Your secrets have been protected and were NOT transmitted to any third-party cloud API."
+                    )
+                    return
+                print(f"⚠️ Local GPU stream failed ({e}), executing failover...")
+                continue
+        else:
+            model_slug = candidate
+            url = "https://openrouter.ai/api/v1/chat/completions"
+            payload = {
+                "model": model_slug,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": prompt}
+                ],
+                "stream": True
+            }
+            req = urllib.request.Request(
+                url,
+                data=json.dumps(payload).encode('utf-8'),
+                headers={
+                    "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+                    "Content-Type": "application/json",
+                    "HTTP-Referer": "https://github.com/dragpk247/jev-gateway",
+                    "X-Title": "Jev Gateway"
+                }
+            )
+            full_text = []
+            yielded_any = False
+            try:
+                with urllib.request.urlopen(req, timeout=35) as resp:
+                    for line in resp:
+                        line_str = line.decode('utf-8').strip()
+                        if not line_str.startswith("data: "):
+                            continue
+                        data_str = line_str[6:]
+                        if data_str == "[DONE]":
+                            break
+                        try:
+                            chunk = json.loads(data_str)
+                            delta = chunk.get("choices", [{}])[0].get("delta", {}).get("content", "")
+                            if delta:
+                                yielded_any = True
+                                full_text.append(delta)
+                                yield delta
+                        except Exception:
+                            continue
+                store_semantic_cache(prompt, "".join(full_text), target)
+                return
+            except Exception as e:
+                last_error = f"Provider stream error ({model_slug}): {e}"
+                if yielded_any:
+                    yield f"\n[Stream interrupted: {e}]"
+                    return
+                print(f"⚠️ Provider {model_slug} failed ({e}), executing failover...")
+                continue
+
+    yield f"\n[Stream Error across failover providers: {last_error}. Run 'jev doctor' for full diagnostics.]"
 
 def route(prompt: str, execute_now: bool = False, save_to_vault: bool = False):
     print(f"\nEvaluating: '{prompt}'")

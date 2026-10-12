@@ -269,6 +269,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
       </div>
     </div>
     <div class="header-pills">
+      <button class="pg-btn" style="padding: 4px 12px; font-size: 12px; background: rgba(56, 189, 248, 0.15); color: var(--accent); border: 1px solid rgba(56, 189, 248, 0.3);" onclick="runDoctorDiagnostics()">🩺 System Doctor</button>
       <span class="pill pill-active"><span class="pill-dot"></span> 99.99% SLA Nominal</span>
       <span class="pill">Port 8085</span>
       <span class="pill">OpenAI SDK V1 Drop-In</span>
@@ -946,9 +947,24 @@ DASHBOARD_HTML = """<!DOCTYPE html>
       }
     }
 
-    async function triggerDistillFilter() {
-      alert("Filtering traces and generating golden dataset...");
-      loadStats();
+    async function runDoctorDiagnostics() {
+      const btn = (typeof event !== 'undefined' && event && event.target) ? event.target : document.querySelector("button[onclick='runDoctorDiagnostics()']");
+      const origText = btn ? btn.innerText : '';
+      if (btn) { btn.innerText = '🩺 Auditing...'; btn.disabled = true; }
+      try {
+        const res = await fetch('/api/doctor');
+        const data = await res.json();
+        if (data.bugs_count === 0) {
+          alert('✓ Jev Doctor Report: All ' + data.total_checks + ' checks passed! Zero bugs or network timeouts detected.');
+        } else {
+          const bugList = (data.bugs || []).map(b => '• ' + b.name + ': ' + b.details + (b.fix ? ' (Fix: ' + b.fix + ')' : '')).join('\\n');
+          alert('⚠ Jev Doctor Report: ' + data.bugs_count + ' issue(s) detected:\\n\\n' + bugList);
+        }
+      } catch (err) {
+        alert('Diagnostic execution error: ' + err);
+      } finally {
+        if (btn) { btn.innerText = origText || '🩺 System Doctor'; btn.disabled = false; }
+      }
     }
 
     function initDashboard() {
@@ -1121,6 +1137,14 @@ class JevGatewayHandler(BaseHTTPRequestHandler):
                         for r in rows
                     ]
                     self._send_json(200, keys_data)
+                except Exception as e:
+                    self._send_json(500, {"error": str(e)})
+            elif clean_path == "/api/doctor":
+                try:
+                    from doctor import JevDoctor
+                    doc = JevDoctor(verbose=False)
+                    report = doc.run_all()
+                    self._send_json(200, report)
                 except Exception as e:
                     self._send_json(500, {"error": str(e)})
             else:
@@ -1309,7 +1333,7 @@ class JevGatewayHandler(BaseHTTPRequestHandler):
 
                     full_text = []
                     t0 = time.time()
-                    for token in execute_stream(target, prompt, context):
+                    for token in execute_stream(target, prompt, context, is_sensitive=is_sensitive):
                         full_text.append(token)
                         chunk = {
                             "id": f"chatcmpl-{uuid.uuid4().hex[:12]}",

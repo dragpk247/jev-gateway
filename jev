@@ -42,6 +42,11 @@ case "$1" in
     curl -s http://localhost:$PORT/api/stats | python3 -m json.tool
     ;;
 
+  doctor)
+    shift
+    "$PYTHON_BIN" "$GATEWAY_DIR/doctor.py" "$@"
+    ;;
+
   distill)
     shift
     if [ "${1:-}" = "train" ]; then
@@ -59,6 +64,7 @@ case "$1" in
     echo "  jev start            Start background HTTP proxy daemon"
     echo "  jev stop             Stop background HTTP proxy daemon"
     echo "  jev status           Check server status and health"
+    echo "  jev doctor           Run comprehensive diagnostic & bug finder"
     echo "  jev dashboard        Open Web Telemetry Dashboard in browser"
     echo "  jev stats            Inspect token & dollar savings via CLI"
     echo "  jev distill status   Show captured distillation traces & golden dataset"
