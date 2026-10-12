@@ -121,13 +121,18 @@ class JevDoctor:
             }
         )
         try:
-            with urllib.request.urlopen(req, timeout=8.0) as resp:
-                first_line = resp.readline().decode("utf-8")
+            with urllib.request.urlopen(req, timeout=12.0) as resp:
+                connected = False
+                for _ in range(12):
+                    line = resp.readline().decode("utf-8").strip()
+                    if line.startswith("data: ") or line.startswith(": OPENROUTER"):
+                        connected = True
+                        break
                 dur = (time.time() - t0) * 1000
-                if "data: " in first_line:
+                if connected:
                     self.log("OpenRouter", "Streaming Connectivity", "PASS", f"TTFT response in {dur:.1f}ms")
                 else:
-                    self.log("OpenRouter", "Streaming Connectivity", "WARN", f"Unexpected response header: {first_line[:60]}")
+                    self.log("OpenRouter", "Streaming Connectivity", "WARN", "Did not receive valid SSE data tokens")
         except Exception as e:
             dur = (time.time() - t0) * 1000
             self.log("OpenRouter", "Streaming Connectivity", "FAIL", f"Failed after {dur:.1f}ms: {e}",
