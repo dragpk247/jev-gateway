@@ -282,6 +282,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     <button id="btn-playground" class="tab-btn" data-tab="playground" onclick="switchTab('playground', this)">⚡ Streaming Sandbox</button>
     <button id="btn-cache" class="tab-btn" data-tab="cache" onclick="switchTab('cache', this)">💾 Semantic Memory</button>
     <button id="btn-distill" class="tab-btn" data-tab="distill" onclick="switchTab('distill', this)">🧠 Distillation Vault</button>
+    <button id="btn-roi" class="tab-btn" data-tab="roi" onclick="switchTab('roi', this)">💰 ROI Calculator</button>
     <button id="btn-apikeys" class="tab-btn" data-tab="apikeys" onclick="switchTab('apikeys', this)">🔑 API Keys & Tenancy</button>
   </div>
 
@@ -538,6 +539,121 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     </div>
   </div>
 
+  <!-- Tab 5: Visual Interactive ROI & Savings Calculator -->
+  <div id="tab-roi" style="display: none;">
+    <div class="playground-box">
+      <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px; flex-wrap: wrap; gap: 12px;">
+        <div>
+          <h3 style="margin: 0 0 4px 0; font-size: 18px;">Executive ROI & Unit Economics Calculator</h3>
+          <p style="color: var(--text-muted); font-size: 13px; margin: 0;">Simulate monthly enterprise spend reduction, cache acceleration, and self-hosted distillation payoff.</p>
+        </div>
+        <div style="display: flex; gap: 8px;">
+          <button class="pg-btn" style="padding: 6px 14px; font-size: 12px;" onclick="exportRoiSummary()">📥 Export ROI Report (CSV)</button>
+          <button class="pg-btn" style="padding: 6px 14px; font-size: 12px; background: #1e293b;" onclick="window.print()">🖨️ Print Executive Summary</button>
+        </div>
+      </div>
+
+      <!-- ROI Input Controls -->
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 18px; background: #060911; border: 1px solid var(--border); border-radius: 8px; padding: 20px; margin-bottom: 24px;">
+        <div>
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+            <label style="font-size: 13px; font-weight: 600; color: #f8fafc;">Current Monthly Spend</label>
+            <span id="roi-spend-disp" style="font-family: var(--font-mono); color: var(--accent); font-weight: 700; font-size: 15px;">$5,000 / mo</span>
+          </div>
+          <input type="range" id="roi-spend" min="500" max="50000" step="500" value="5000" style="width: 100%; accent-color: var(--accent); cursor: pointer;" oninput="updateRoiCalc()">
+          <div style="display: flex; justify-content: space-between; font-size: 11px; color: var(--text-muted); margin-top: 4px;">
+            <span>$500</span>
+            <span>$25,000</span>
+            <span>$50,000</span>
+          </div>
+        </div>
+
+        <div>
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+            <label style="font-size: 13px; font-weight: 600; color: #f8fafc;">Repeated / Redundant Queries</label>
+            <span id="roi-cache-disp" style="font-family: var(--font-mono); color: var(--warning); font-weight: 700; font-size: 15px;">35%</span>
+          </div>
+          <input type="range" id="roi-cache" min="10" max="70" step="5" value="35" style="width: 100%; accent-color: var(--warning); cursor: pointer;" oninput="updateRoiCalc()">
+          <div style="display: flex; justify-content: space-between; font-size: 11px; color: var(--text-muted); margin-top: 4px;">
+            <span>10% (Unique)</span>
+            <span>35% (Typical)</span>
+            <span>70% (Repetitive)</span>
+          </div>
+        </div>
+
+        <div>
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+            <label style="font-size: 13px; font-weight: 600; color: #f8fafc;">Tier-1 Routable Prompts</label>
+            <span id="roi-route-disp" style="font-family: var(--font-mono); color: var(--purple); font-weight: 700; font-size: 15px;">45%</span>
+          </div>
+          <input type="range" id="roi-route" min="15" max="80" step="5" value="45" style="width: 100%; accent-color: var(--purple); cursor: pointer;" oninput="updateRoiCalc()">
+          <div style="display: flex; justify-content: space-between; font-size: 11px; color: var(--text-muted); margin-top: 4px;">
+            <span>15%</span>
+            <span>45% (Boilerplate/Factual)</span>
+            <span>80%</span>
+          </div>
+        </div>
+
+        <div>
+          <label style="font-size: 13px; font-weight: 600; color: #f8fafc; display: block; margin-bottom: 8px;">Current Primary Cloud Model</label>
+          <select id="roi-model" style="width: 100%; background: var(--bg); border: 1px solid var(--border); color: #fff; padding: 8px 12px; border-radius: 6px; font-size: 13px;" onchange="updateRoiCalc()">
+            <option value="gpt4o">OpenAI GPT-4o ($2.50 / $10.00 MTok)</option>
+            <option value="claude37">Anthropic Claude 3.7 Sonnet ($3.00 / $15.00 MTok)</option>
+            <option value="o1">OpenAI o1 Reasoning ($15.00 / $60.00 MTok)</option>
+          </select>
+          <div style="font-size: 11px; color: var(--text-muted); margin-top: 6px;">Evaluated against local Ollama + DeepSeek-V3 routing</div>
+        </div>
+      </div>
+
+      <!-- Reactive Executive Metrics Grid -->
+      <div class="grid" style="margin-bottom: 24px;">
+        <div class="card" style="border-color: rgba(16, 185, 129, 0.4); background: rgba(16, 185, 129, 0.04);">
+          <div class="card-title">Projected Monthly Bill with Jev</div>
+          <div class="card-value" style="color: var(--success);" id="roi-new-bill">$1,075</div>
+          <div class="card-subtext" id="roi-pct-cut">78.5% spend reduction</div>
+        </div>
+        <div class="card" style="border-color: rgba(56, 189, 248, 0.4); background: rgba(56, 189, 248, 0.04);">
+          <div class="card-title">Net Monthly Cash Saved</div>
+          <div class="card-value" style="color: var(--accent);" id="roi-saved-month">$3,925 / mo</div>
+          <div class="card-subtext" id="roi-saved-annual">$47,100 annualized savings</div>
+        </div>
+        <div class="card">
+          <div class="card-title">FastPath Cache Direct Value</div>
+          <div class="card-value" style="color: var(--warning);" id="roi-cache-val">$1,750 / mo</div>
+          <div class="card-subtext">&lt;3ms latency, $0 compute cost</div>
+        </div>
+        <div class="card">
+          <div class="card-title">Days to Fully Private Model</div>
+          <div class="card-value" style="color: var(--purple);" id="roi-distill-days">18 Days</div>
+          <div class="card-subtext">50k verified traces for LoRA tuning</div>
+        </div>
+      </div>
+
+      <!-- Detailed Breakdown Comparison Table -->
+      <div class="table-container">
+        <div class="table-header-bar">
+          <span style="font-weight: 700; font-size: 13px;">Unit Economic Optimization Breakdown</span>
+          <span style="font-size: 12px; color: var(--accent); font-weight: 600;">Zero Architecture Changes Required</span>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>Routing Layer</th>
+              <th>Traffic Allocation</th>
+              <th>Direct Cloud Cost</th>
+              <th>Jev Gateway Cost</th>
+              <th>Net Monthly Savings</th>
+              <th>Avg Latency</th>
+            </tr>
+          </thead>
+          <tbody id="roi-breakdown-body">
+            <!-- Populated via JS -->
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
   <script>
     function setTxt(id, val) {
       try {
@@ -548,7 +664,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
     function switchTab(tab, btn) {
       try {
-        const tabs = ['analytics', 'playground', 'cache', 'distill', 'apikeys'];
+        const tabs = ['analytics', 'playground', 'cache', 'distill', 'roi', 'apikeys'];
         tabs.forEach(t => {
           const el = document.getElementById('tab-' + t);
           if (el) el.style.display = (t === tab) ? 'block' : 'none';
@@ -557,6 +673,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         const activeBtn = btn || document.getElementById('btn-' + tab) || document.querySelector(`button[data-tab="${tab}"]`);
         if (activeBtn) activeBtn.classList.add('active');
         if (tab === 'cache') loadCache();
+        if (tab === 'roi') updateRoiCalc();
         if (tab === 'apikeys') loadKeys();
       } catch (e) {
         console.error("Tab switch error:", e);
@@ -967,6 +1084,130 @@ DASHBOARD_HTML = """<!DOCTYPE html>
       }
     }
 
+    function updateRoiCalc() {
+      try {
+        const spendEl = document.getElementById('roi-spend');
+        const cacheEl = document.getElementById('roi-cache');
+        const routeEl = document.getElementById('roi-route');
+        const modelEl = document.getElementById('roi-model');
+
+        if (!spendEl || !cacheEl || !routeEl || !modelEl) return;
+
+        const spend = parseFloat(spendEl.value) || 5000;
+        const cachePct = (parseFloat(cacheEl.value) || 35) / 100;
+        const routePct = (parseFloat(routeEl.value) || 45) / 100;
+        const modelKey = modelEl.value;
+
+        setTxt('roi-spend-disp', '$' + spend.toLocaleString() + ' / mo');
+        setTxt('roi-cache-disp', Math.round(cachePct * 100) + '%');
+        setTxt('roi-route-disp', Math.round(routePct * 100) + '%');
+
+        // Model pricing benchmarks ($/MTok blended)
+        let cloudRate = 6.25; // GPT-4o approx ($2.50 in, $10 out)
+        if (modelKey === 'claude37') cloudRate = 9.0; // Claude 3.7 Sonnet ($3 in, $15 out)
+        else if (modelKey === 'o1') cloudRate = 37.5; // o1 ($15 in, $60 out)
+
+        // Jev routing breakdown:
+        // 1. Semantic Cache: $0 compute
+        // 2. Local GPU / Tier-1: ~92% cheaper (DeepSeek-V3 / Ollama)
+        // 3. Fallback Cloud: remaining traffic
+        const cacheTraffic = spend * cachePct;
+        const remainingAfterCache = spend - cacheTraffic;
+        const tier1Traffic = remainingAfterCache * routePct;
+        const cloudComplexTraffic = remainingAfterCache - tier1Traffic;
+
+        // Jev Cost Computation
+        const jevCacheCost = 0;
+        const jevTier1Cost = tier1Traffic * 0.08; // 92% savings via DeepSeek-V3 / Ollama
+        const jevCloudCost = cloudComplexTraffic * 0.95; // 5% savings via prompt pruning AST
+        const totalJevBill = Math.round(jevCacheCost + jevTier1Cost + jevCloudCost);
+
+        const netSavingsMonth = Math.max(0, Math.round(spend - totalJevBill));
+        const netSavingsYear = netSavingsMonth * 12;
+        const pctReduction = ((netSavingsMonth / spend) * 100).toFixed(1);
+
+        setTxt('roi-new-bill', '$' + totalJevBill.toLocaleString() + ' / mo');
+        setTxt('roi-pct-cut', pctReduction + '% spend reduction');
+        setTxt('roi-saved-month', '$' + netSavingsMonth.toLocaleString() + ' / mo');
+        setTxt('roi-saved-annual', '$' + netSavingsYear.toLocaleString() + ' annualized savings');
+        setTxt('roi-cache-val', '$' + Math.round(cacheTraffic).toLocaleString() + ' / mo');
+
+        // Estimate traces per month (assuming avg $0.005 per direct query)
+        const estQueries = Math.round(spend / 0.005);
+        const distillEligible = Math.round(estQueries * 0.40);
+        const daysTo50k = Math.max(3, Math.round(50000 / (distillEligible / 30)));
+        setTxt('roi-distill-days', daysTo50k + ' Days');
+
+        // Render Breakdown Table
+        const tbody = document.getElementById('roi-breakdown-body');
+        if (tbody) {
+          tbody.innerHTML = `
+            <tr>
+              <td><span class="tag tag-cache">⚡ FastPath Semantic Cache</span></td>
+              <td>${Math.round(cachePct * 100)}% of traffic</td>
+              <td style="color: var(--danger);">$${Math.round(cacheTraffic).toLocaleString()}</td>
+              <td style="color: var(--success); font-weight: 700;">$0.00</td>
+              <td style="color: var(--accent); font-weight: 700;">+$${Math.round(cacheTraffic).toLocaleString()}</td>
+              <td style="font-family: var(--font-mono);">&lt; 3 ms</td>
+            </tr>
+            <tr>
+              <td><span class="tag tag-deepseek">🧠 Tier-1 (DeepSeek-V3 / Local GPU)</span></td>
+              <td>${Math.round((1 - cachePct) * routePct * 100)}% of traffic</td>
+              <td style="color: var(--danger);">$${Math.round(tier1Traffic).toLocaleString()}</td>
+              <td style="color: var(--success); font-weight: 700;">$${Math.round(jevTier1Cost).toLocaleString()}</td>
+              <td style="color: var(--accent); font-weight: 700;">+$${Math.round(tier1Traffic - jevTier1Cost).toLocaleString()}</td>
+              <td style="font-family: var(--font-mono);">210 - 450 ms</td>
+            </tr>
+            <tr>
+              <td><span class="tag tag-local">☁️ Frontier Cloud + AST Pruning</span></td>
+              <td>${Math.round((1 - cachePct) * (1 - routePct) * 100)}% of traffic</td>
+              <td style="color: var(--danger);">$${Math.round(cloudComplexTraffic).toLocaleString()}</td>
+              <td style="color: var(--success); font-weight: 700;">$${Math.round(jevCloudCost).toLocaleString()}</td>
+              <td style="color: var(--accent); font-weight: 700;">+$${Math.round(cloudComplexTraffic - jevCloudCost).toLocaleString()}</td>
+              <td style="font-family: var(--font-mono);">750 - 1,400 ms</td>
+            </tr>
+            <tr style="background: rgba(56, 189, 248, 0.05); font-weight: 700;">
+              <td>TOTAL ENTERPRISE SAVINGS</td>
+              <td>100% Traffic</td>
+              <td style="color: var(--danger);">$${Math.round(spend).toLocaleString()} / mo</td>
+              <td style="color: var(--success);">$${totalJevBill.toLocaleString()} / mo</td>
+              <td style="color: var(--accent); font-size: 14px;">+$${netSavingsMonth.toLocaleString()} / mo (${pctReduction}%)</td>
+              <td style="color: var(--success);">4.2x Faster Avg</td>
+            </tr>
+          `;
+        }
+      } catch (err) {
+        console.error("updateRoiCalc error:", err);
+      }
+    }
+
+    function exportRoiSummary() {
+      const spend = document.getElementById('roi-spend')?.value || '5000';
+      const cache = document.getElementById('roi-cache')?.value || '35';
+      const route = document.getElementById('roi-route')?.value || '45';
+      const model = document.getElementById('roi-model')?.value || 'gpt4o';
+      const newBill = document.getElementById('roi-new-bill')?.innerText || '$0';
+      const savedMonth = document.getElementById('roi-saved-month')?.innerText || '$0';
+      const savedYear = document.getElementById('roi-saved-annual')?.innerText || '$0';
+
+      const csv = `Jev Gateway Enterprise ROI & Financial Savings Audit\\n` +
+        `Baseline Spend,$${spend} / month\\n` +
+        `Repetition Rate,${cache}%\\n` +
+        `Tier-1 Routable Prompts,${route}%\\n` +
+        `Selected Benchmark Model,${model}\\n` +
+        `Projected Monthly Cost with Jev,${newBill}\\n` +
+        `Net Monthly Savings,${savedMonth}\\n` +
+        `Annualized Savings,${savedYear}\\n` +
+        `Generated At,${new Date().toISOString()}\\n`;
+
+      const blob = new Blob([csv], { type: 'text/csv' });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `Jev_Gateway_ROI_Simulation_${new Date().toISOString().split('T')[0]}.csv`;
+      a.click();
+    }
+
     function initDashboard() {
       // Bind tab buttons directly
       document.querySelectorAll('.tab-btn').forEach(btn => {
@@ -977,6 +1218,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
       });
 
       setSnippLang('python');
+      updateRoiCalc();
       loadStats();
       loadCache();
       loadKeys();
