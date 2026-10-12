@@ -65,6 +65,8 @@ case "$1" in
     echo "  jev stop             Stop background HTTP proxy daemon"
     echo "  jev status           Check server status and health"
     echo "  jev doctor           Run comprehensive diagnostic & bug finder"
+    echo "  jev doctor --fix     Run automated self-healing repair loop"
+    echo "  jev doctor --watch   Continuous background health watchdog"
     echo "  jev dashboard        Open Web Telemetry Dashboard in browser"
     echo "  jev stats            Inspect token & dollar savings via CLI"
     echo "  jev distill status   Show captured distillation traces & golden dataset"

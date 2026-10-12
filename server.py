@@ -1142,8 +1142,12 @@ class JevGatewayHandler(BaseHTTPRequestHandler):
             elif clean_path == "/api/doctor":
                 try:
                     from doctor import JevDoctor
+                    should_heal = "heal=true" in self.path or "fix=true" in self.path
                     doc = JevDoctor(verbose=False)
-                    report = doc.run_all()
+                    if should_heal:
+                        report = doc.auto_heal(max_iterations=3)
+                    else:
+                        report = doc.run_all()
                     self._send_json(200, report)
                 except Exception as e:
                     self._send_json(500, {"error": str(e)})

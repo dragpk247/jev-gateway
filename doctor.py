@@ -274,7 +274,147 @@ class JevDoctor:
             "results": self.results
         }
 
+    def auto_heal(self, max_iterations: int = 3):
+        """
+        Executes an automated self-healing repair loop:
+        Identifies bugs, runs targeted remediation, and re-audits until 0 bugs remain.
+        """
+        if self.verbose:
+            print(f"\n{BOLD}{CYAN}═════════════════════════════════════════════════════════════════{RESET}")
+            print(f"{BOLD}{CYAN}       🛠️  JEV AUTOMATED SELF-HEALING & AUTO-REPAIR LOOP         {RESET}")
+            print(f"{BOLD}{CYAN}═════════════════════════════════════════════════════════════════{RESET}\n")
+
+        all_actions = []
+        for iteration in range(1, max_iterations + 1):
+            if self.verbose:
+                print(f"{BOLD}▶ Diagnostic Audit Pass #{iteration} of {max_iterations}...{RESET}")
+
+            self.results = []
+            self.bugs_found = []
+            self.run_all()
+
+            if not self.bugs_found:
+                if self.verbose:
+                    print(f"\n{GREEN}{BOLD}✨ 100% HEALTH CONFIRMED: 0 bugs detected after Pass #{iteration}!{RESET}\n")
+                return {
+                    "success": True,
+                    "passes_run": iteration,
+                    "actions_taken": all_actions,
+                    "remaining_bugs": 0,
+                    "status": "ALL_SYSTEMS_NOMINAL"
+                }
+
+            if self.verbose:
+                print(f"\n{YELLOW}{BOLD}⚡ Executing Automated Repairs for {len(self.bugs_found)} Issue(s)...{RESET}")
+
+            pass_actions = []
+            for bug in list(self.bugs_found):
+                cat = bug["name"]
+                details = bug["details"]
+
+                # 1. Gateway Server offline or unresponsive
+                if "Gateway Daemon" in cat or "Health Endpoint" in cat:
+                    action_msg = "Restarting Jev Gateway Daemon via ./jev stop && ./jev start..."
+                    if self.verbose: print(f"  🔧 {action_msg}")
+                    try:
+                        import subprocess
+                        subprocess.run([str(PROJECT_DIR / "jev"), "stop"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                        time.sleep(0.5)
+                        subprocess.run([str(PROJECT_DIR / "jev"), "start"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                        time.sleep(1.5)
+                        pass_actions.append("Restarted Jev Gateway Daemon")
+                    except Exception as e:
+                        pass_actions.append(f"Failed to restart gateway: {e}")
+
+                # 2. SQLite database / storage integrity
+                elif "Storage" in cat or "Database" in cat:
+                    action_msg = "Reinitializing SQLite databases and repairing schemas..."
+                    if self.verbose: print(f"  🔧 {action_msg}")
+                    try:
+                        main.init_dbs()
+                        pass_actions.append("Rebuilt SQLite database schemas")
+                    except Exception as e:
+                        pass_actions.append(f"Failed to reinit databases: {e}")
+
+                # 3. Ollama offline
+                elif "Ollama" in cat and ("Connection failed" in details or "offline" in details.lower()):
+                    action_msg = "Attempting to restart local Ollama service..."
+                    if self.verbose: print(f"  🔧 {action_msg}")
+                    try:
+                        import subprocess
+                        res = subprocess.run(["systemctl", "--user", "start", "ollama"], capture_output=True)
+                        if res.returncode != 0:
+                            subprocess.run(["systemctl", "start", "ollama"], capture_output=True)
+                        time.sleep(2.0)
+                        pass_actions.append("Attempted service restart for Ollama")
+                    except Exception as e:
+                        pass_actions.append(f"Failed to start Ollama: {e}")
+
+                # 4. Missing target model
+                elif "Ollama" in cat and "missing" in details:
+                    action_msg = "Detecting installed local models for fallback configuration..."
+                    if self.verbose: print(f"  🔧 {action_msg}")
+                    try:
+                        req = urllib.request.Request("http://127.0.0.1:11434/api/tags")
+                        with urllib.request.urlopen(req, timeout=2.0) as resp:
+                            data = json.loads(resp.read().decode("utf-8"))
+                            models = [m.get("name", "") for m in data.get("models", [])]
+                            coder_models = [m for m in models if "coder" in m or "qwen" in m]
+                            pass_actions.append(f"Available local models detected: {coder_models or models[:3]}")
+                    except Exception as e:
+                        pass_actions.append(f"Model probe error: {e}")
+
+                # 5. Missing OpenRouter key
+                elif "OpenRouter" in cat and "Missing" in details:
+                    env_k = os.getenv("OPENROUTER_API_KEY")
+                    if env_k:
+                        kpath = Path.home() / ".config" / "jev" / "openrouter_key"
+                        kpath.parent.mkdir(parents=True, exist_ok=True)
+                        kpath.write_text(env_k.strip())
+                        pass_actions.append(f"Persisted OPENROUTER_API_KEY to {kpath}")
+
+            all_actions.extend(pass_actions)
+            time.sleep(1.0)
+
+        # Final audit pass
+        self.results = []
+        self.bugs_found = []
+        self.run_all()
+        return {
+            "success": len(self.bugs_found) == 0,
+            "passes_run": max_iterations,
+            "actions_taken": all_actions,
+            "remaining_bugs": len(self.bugs_found),
+            "bugs": self.bugs_found
+        }
+
+    def watch_and_heal(self, interval_seconds: int = 60):
+        """Runs continuous background health monitoring with automatic repair."""
+        print(f"{BOLD}{GREEN}👁️  Jev Doctor Watchdog active. Auditing every {interval_seconds}s...{RESET}")
+        print("Press Ctrl+C to stop.")
+        while True:
+            try:
+                report = self.auto_heal(max_iterations=2)
+                if report["remaining_bugs"] > 0:
+                    print(f"{YELLOW}⚠ Watchdog found {report['remaining_bugs']} unresolved issue(s). Retrying next cycle...{RESET}")
+                time.sleep(interval_seconds)
+            except KeyboardInterrupt:
+                print(f"\n{CYAN}Watchdog stopped.{RESET}")
+                break
+            except Exception as e:
+                print(f"{RED}Watchdog cycle error: {e}{RESET}")
+                time.sleep(interval_seconds)
+
 if __name__ == "__main__":
+    auto_heal_mode = any(arg in sys.argv for arg in ("--fix", "--heal", "--auto", "-f"))
+    watch_mode = any(arg in sys.argv for arg in ("--watch", "--daemon", "-w"))
+
     doctor = JevDoctor(verbose=True)
-    report = doctor.run_all()
-    sys.exit(0 if report["bugs_count"] == 0 else 1)
+    if watch_mode:
+        doctor.watch_and_heal()
+    elif auto_heal_mode:
+        report = doctor.auto_heal(max_iterations=3)
+        sys.exit(0 if report["remaining_bugs"] == 0 else 1)
+    else:
+        report = doctor.run_all()
+        sys.exit(0 if report["bugs_count"] == 0 else 1)
