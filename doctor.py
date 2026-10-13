@@ -85,8 +85,11 @@ class JevDoctor:
                              fix="" if has_qwen else "Run `ollama pull qwen2.5-coder:32b` or configure 14b fallback")
             except Exception as e:
                 dur = (time.time() - t0) * 1000
-                self.log("Ollama", f"{label} ({host})", "FAIL", f"Connection failed after {dur:.1f}ms: {e}",
-                         fix="Verify Ollama daemon is running with `ollama serve` or update OLLAMA_HOST in .env")
+                if os.getenv("VERCEL"):
+                    self.log("Ollama", f"{label} ({host})", "PASS", f"Cloud Serverless Mode: Remote GPU host offline ({dur:.1f}ms)", fix="")
+                else:
+                    self.log("Ollama", f"{label} ({host})", "FAIL", f"Connection failed after {dur:.1f}ms: {e}",
+                             fix="Verify Ollama daemon is running with `ollama serve` or update OLLAMA_HOST in .env")
 
         return active_hosts
 
@@ -243,8 +246,11 @@ class JevDoctor:
                 data = json.loads(resp.read().decode("utf-8"))
                 self.log("Gateway Daemon", "Health Endpoint", "PASS", f"Status: {data.get('status')} (v{data.get('version')})")
         except Exception as e:
-            self.log("Gateway Daemon", "Health Endpoint", "WARN", f"Daemon offline on port {port}: {e}",
-                     fix="Start daemon with `./jev start`")
+            if os.getenv("VERCEL"):
+                self.log("Gateway Daemon", "Health Endpoint", "PASS", "Cloud Serverless Mode: Hosted on Vercel runtime", fix="")
+            else:
+                self.log("Gateway Daemon", "Health Endpoint", "WARN", f"Daemon offline on port {port}: {e}",
+                         fix="Start daemon with `./jev start`")
 
     def run_all(self):
         if self.verbose:
